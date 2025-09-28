@@ -610,3 +610,185 @@ class ReadwiseBatch(Base):
         if self.database_write_time:
             parts.append(f"write={self.database_write_time.isoformat()}")
         return ", ".join(parts) + ")"
+
+
+class RoamPage(Base):
+    """
+    A Roam page highlights have been written to.
+
+    Highlights are expected to be stored under a header which is stored in this table.
+    """
+
+    __tablename__ = "roam_pages"
+
+    page_uid: Mapped[str] = mapped_column(primary_key=True)
+    highlights_header_uid: Mapped[str] = mapped_column(nullable=False)
+    highlights_header_text: Mapped[str] = mapped_column(nullable=False)
+
+    export_batch_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("roam_export_batches.id"), nullable=True
+    )
+    export_batch: Mapped[Optional["RoamExportBatch"]] = relationship(
+        back_populates="pages"
+    )
+
+    books: Mapped[list["RoamBookExport"]] = relationship(back_populates="roam_page")
+    highlights: Mapped[list["RoamHighlightExport"]] = relationship(
+        back_populates="roam_page"
+    )
+    snapshots: Mapped[list["RoamPageSnapshot"]] = relationship(
+        back_populates="roam_page"
+    )
+
+
+class RoamPageSnapshot(Base):
+    """
+    A JSON snapshot of the books and highlights under the given header.
+    """
+
+    __tablename__ = "roam_page_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    page_uid: Mapped[str] = mapped_column(ForeignKey("roam_pages.page_uid"))
+    block_tree: Mapped[dict] = mapped_column(JSON)
+    block_tree_hash: Mapped[str]
+    version: Mapped[int]
+    version_date: Mapped[datetime] = mapped_column(default=lambda: datetime.now())
+
+    export_batch_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("roam_export_batches.id"), nullable=True
+    )
+    export_batch: Mapped[Optional["RoamExportBatch"]] = relationship(
+        back_populates="page_snapshots"
+    )
+
+    roam_page: Mapped["RoamPage"] = relationship(back_populates="snapshots")
+
+
+class RoamBookExport(Base):
+    """
+
+    Attributes
+    ----------
+    user_book_id : int
+
+    parent_block_uid : str
+        The Roam block id for the book's parent. Highlights
+    """
+
+    __tablename__ = "roam_books"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    page_uid: Mapped[str] = mapped_column(
+        ForeignKey("roam_pages.page_uid"), nullable=False
+    )
+    user_book_id: Mapped[int] = mapped_column(
+        ForeignKey("books.user_book_id"), nullable=False
+    )
+    parent_block_uid: Mapped[str] = mapped_column(nullable=False)
+    export_date: Mapped[datetime] = mapped_column(
+        default=lambda: datetime.now(), nullable=False
+    )
+
+    export_batch_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("roam_export_batches.id"), nullable=True
+    )
+    export_batch: Mapped[Optional["RoamExportBatch"]] = relationship(
+        back_populates="books"
+    )
+
+    roam_page: Mapped["RoamPage"] = relationship(back_populates="books")
+    book: Mapped["Book"] = relationship(viewonly=True)
+
+
+class RoamHighlightExport(Base):
+    """
+    A record of a highlight being exported into a Roam page.
+    """
+
+    __tablename__ = "roam_highlights"
+
+    highlight_id: Mapped[int] = mapped_column(
+        ForeignKey("highlights.id"), primary_key=True
+    )
+    page_uid: Mapped[str] = mapped_column(
+        ForeignKey("roam_pages.page_uid"), nullable=False
+    )
+    block_uid: Mapped[str] = mapped_column(nullable=False)
+    export_date: Mapped[datetime] = mapped_column(nullable=False)
+
+    export_batch_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("roam_export_batches.id"), nullable=True
+    )
+    export_batch: Mapped[Optional["RoamExportBatch"]] = relationship(
+        back_populates="highlights"
+    )
+
+    roam_page: Mapped["RoamPage"] = relationship(back_populates="highlights")
+    highlight: Mapped["Highlight"] = relationship(viewonly=True)
+    snapshots: Mapped[list["RoamHighlightSnapshot"]] = relationship(
+        back_populates="highlight"
+    )
+
+
+class RoamHighlightSnapshot(Base):
+    """
+    A snapshot of a highlight block.
+
+    Captures the block attributes and children and their attributes, capturing any
+    indented text added under the highlight.
+
+    """
+
+    __tablename__ = "roam_highlight_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    highlight_id: Mapped[int] = mapped_column(
+        ForeignKey("roam_highlights.highlight_id")
+    )
+    block_tree: Mapped[dict] = mapped_column(JSON)
+    block_tree_hash: Mapped[str]
+    version: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now())
+
+    export_batch_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("roam_export_batches.id"), nullable=True
+    )
+    export_batch: Mapped[Optional["RoamExportBatch"]] = relationship(
+        back_populates="highlight_snapshots"
+    )
+
+    highlight: Mapped["RoamHighlightExport"] = relationship(back_populates="snapshots")
+
+
+class RoamExportBatch(Base):
+    """
+    A batch of database updates written to Roam.
+    """
+
+    __tablename__ = "roam_export_batches"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    database_write_time: Mapped[datetime] = mapped_column(nullable=True)
+
+    pages: Mapped[list["RoamPage"]] = relationship(back_populates="export_batch")
+    highlights: Mapped[list["RoamHighlightExport"]] = relationship(
+        back_populates="export_batch"
+    )
+    page_snapshots: Mapped[list["RoamPageSnapshot"]] = relationship(
+        back_populates="export_batch"
+    )
+    highlight_snapshots: Mapped[list["RoamHighlightSnapshot"]] = relationship(
+        back_populates="export_batch"
+    )
+    books: Mapped[list["RoamBookExport"]] = relationship(back_populates="export_batch")
+
+    def __repr__(self) -> str:
+        parts = [f"RoamExportBatch(id={self.id!r})"]
+        parts.append(f"pages={len(self.pages)}")
+        parts.append(f"highlights={len(self.highlights)}")
+        parts.append(f"page_snapshots={len(self.page_snapshots)}")
+        parts.append(f"highlight_snapshots={len(self.highlight_snapshots)}")
+        if self.database_write_time:
+            parts.append(f"write={self.database_write_time.isoformat()}")
+        return ", ".join(parts) + ")"

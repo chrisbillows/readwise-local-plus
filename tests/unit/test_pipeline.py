@@ -43,7 +43,7 @@ def mock_run_pipeline_flattened_objs() -> tuple[dict, Any]:
         "mock_validate_flattened_objects": MagicMock(
             return_value={"obj_name": "objs_with_final_validation_status"}
         ),
-        "mock_update_database_flattened_objects": MagicMock(),
+        "mock_update_database_flattened_objects": MagicMock(return_value="1"),
     }
     actual = run_pipeline_flattened_objects(
         user_config=MagicMock(DB="db"),
@@ -596,4 +596,4 @@ def test_run_pipeline_flattened_objects_return_value(
     mock_run_pipeline_flattened_objs: tuple[dict, Any],
 ):
     mocks, run_pipeline_return_value = mock_run_pipeline_flattened_objs
-    assert run_pipeline_return_value is None
+    assert run_pipeline_return_value == "1"
