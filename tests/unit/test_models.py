@@ -423,6 +423,12 @@ def test_tables_in_mem_db_containing_minimal_objects(
             "highlights",
             "readwise_batches",
             "readwise_last_fetch",
+            "roam_books",
+            "roam_export_batches",
+            "roam_highlight_snapshots",
+            "roam_highlights",
+            "roam_page_snapshots",
+            "roam_pages",
         ]
 
 
@@ -503,6 +509,12 @@ def test_tables_in_mem_db_containing_unnested_minimal_objects(
             "highlights",
             "readwise_batches",
             "readwise_last_fetch",
+            "roam_books",
+            "roam_export_batches",
+            "roam_highlight_snapshots",
+            "roam_highlights",
+            "roam_page_snapshots",
+            "roam_pages",
         ]
 
 

@@ -221,12 +221,20 @@ class DatabasePopulaterFlattenedData:
         are included. i.e. A book might have 100 highlights, but if only 1 highlight has
         been added since the last fetch, only 1 highlight will be in the highlights
         list.
+
+        Return
+        ------
+        None | int
+            The number of the batch just written or None if no writeable highlights
+            were found.
         """
         for obj_name, raw_objs in self.validated_flattened_objs.items():
             orm_model = self.ORM_TABLE_MAP[obj_name]
             for raw_obj in raw_objs:
                 self._process_obj(raw_obj, orm_model)
-        return self._batch is not None
+        if self._batch is None:
+            return None
+        return self.batch.id
 
     def _process_obj(self, raw_obj: dict[str, Any], orm_model: Type[Base]) -> None:
         """
@@ -251,7 +259,7 @@ class DatabasePopulaterFlattenedData:
         if not existing_obj:
             # Object is brand new.
             self._ensure_batch()
-            obj_as_orm = orm_model(**raw_obj, batch=self.batch)
+            obj_as_orm = orm_model(**raw_obj, batch=self._batch)
             self.session.add(obj_as_orm)
         else:
             # Object already exists.
@@ -325,7 +333,7 @@ class DatabasePopulaterFlattenedData:
                 **existing_obj.dump_column_data(exclude={"batch_id"}),
                 version=version_num,
                 batch_id_when_new=existing_obj.batch_id,
-                batch_when_versioned=self.batch,
+                batch_when_versioned=self._batch,
             )
             self.session.add(version_snapshot_orm)
 
@@ -346,7 +354,7 @@ class DatabasePopulaterFlattenedData:
         """
         for field, value in raw_obj.items():
             setattr(existing_obj, field, value)
-        existing_obj.batch = self.batch
+        existing_obj.batch = self._batch
         self.session.add(existing_obj)
 
     def _iterate_version_number(

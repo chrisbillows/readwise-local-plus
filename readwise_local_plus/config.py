@@ -44,9 +44,11 @@ class UserConfig:
         self.log_path = self.app_dir / "logs" / "app.log"
         self.config_dir = user_dir / ".config" / "readwise-local-plus"
         self.env_file: Path = self.config_dir / ".env"
+        self.db_path: Path = self.app_dir / "readwise-local-plus.db"
         self.load_environment_variables_file()
         self.readwise_api_token: str | None = os.getenv("READWISE_API_TOKEN")
-        self.db_path: Path = self.app_dir / "readwise-local-plus.db"
+        self.roam_api_token: str | None = os.getenv("ROAM_API_TOKEN")
+        self.roam_graph_name: str = "Billowz"
 
     def load_environment_variables_file(self) -> None:
         """

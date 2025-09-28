@@ -12,6 +12,7 @@ from readwise_local_plus.db_operations import (
     update_readwise_last_fetch,
 )
 from readwise_local_plus.integrations.readwise import fetch_from_export_api
+from readwise_local_plus.models import ReadwiseBatch
 from readwise_local_plus.schemas import (
     BookSchemaUnnested,
     BookTagsSchema,
@@ -374,7 +375,7 @@ def update_database_flattened_objects(
     flattened_validated_objs: dict[str, list[dict[str, Any]]],
     start_fetch: datetime,
     end_fetch: datetime,
-) -> None:
+) -> ReadwiseBatch:
     """
     Update the database. Expects flattened Readwise objects.
 
@@ -389,13 +390,19 @@ def update_database_flattened_objects(
         The time the fetch was called.
     end_fetch: datetime
         The time the fetch was completed.
+
+    Returns
+    -------
+    int | None
+        The batch id of all the highlights and objects written to the database.
     """
     logger.info("Updating database")
     dbp_fd = DatabasePopulaterFlattenedData(
         session, flattened_validated_objs, start_fetch, end_fetch
     )
-    dbp_fd.populate_database()
+    batch_updated = dbp_fd.populate_database()
     logger.info("Database updated.")
+    return batch_updated
 
 
 def run_pipeline_flattened_objects(
@@ -407,7 +414,7 @@ def run_pipeline_flattened_objects(
     flatten_func: FlattenFn = flatten_books_with_highlights,
     validate_flat_objs_func: ValidateFlatObjFn = validate_flattened_objects,
     update_db_func: UpdateDbFlatObjFn = update_database_flattened_objects,
-) -> None:
+) -> None | ReadwiseBatch:
     """
     Orchestrate the end-to-end Readwise data sync process.
 
@@ -441,7 +448,14 @@ def run_pipeline_flattened_objects(
     update_db_func: UpdateDbFlattenedDataFn, optional,
             default = update_database_flattened_objects()
         Function that populates the database with the flattened objects.
+
+    Returns
+    -------
+    int | None
+        The batch highlights were written in, or None if no writable highlights were
+        found.
     """
+    batch_written = None
     raw_books, start_fetch, end_fetch = fetch_func(last_fetch)
 
     with get_session_func(user_config.db_path) as session:
@@ -451,7 +465,11 @@ def run_pipeline_flattened_objects(
             flat_objs_second_validation = validate_flat_objs_func(
                 flat_objs_first_validation
             )
-            update_db_func(session, flat_objs_second_validation, start_fetch, end_fetch)
+            # Raw books doesn't not guarantee writable updates. All highlights might
+            # already exist in the database.
+            batch_written: int | None = update_db_func(
+                session, flat_objs_second_validation, start_fetch, end_fetch
+            )
 
         # Always update the readwise_last_fetch table with the start and end fetch
         # times, even if no new data was fetched.
@@ -460,8 +478,12 @@ def run_pipeline_flattened_objects(
         try:
             logging.info("Committing session")
             session.commit()
+            # Then return the batch id or batch object
+            logging.info("Session committed")
 
         except Exception as err:
             session.rollback()
             logging.info(f"Error occurred committing session: {err}")
             raise err
+
+        return batch_written

@@ -156,7 +156,13 @@ def main(user_config: Optional[UserConfig] = None) -> None:
         else:
             logger.info("Running delta sync (--delta).")
             last_fetch = check_database(user_config)
-            run_pipeline_flattened_objects(user_config, last_fetch=last_fetch)
+            batch_written = run_pipeline_flattened_objects(
+                user_config, last_fetch=last_fetch
+            )
+            print("Batch written was: ", batch_written)
+            if batch_written:
+                print("This would trigger writing to Roam!")
+                pass
 
     elif args.command == "list-invalids":
         list_invalid_db_objects(user_config)

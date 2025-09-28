@@ -12,7 +12,7 @@ FetchFn = Callable[[datetime | None], tuple[list[dict[str, Any]], datetime, date
 FlattenFn = Callable[[list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]
 SessionFn = Callable[[str | Path], Session]
 UpdateDbFlatObjFn = Callable[
-    [Session, dict[str, list[dict[str, Any]]], datetime, datetime], None
+    [Session, dict[str, list[dict[str, Any]]], datetime, datetime], int | None
 ]
 ValidateNestedObjFn = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
 ValidateFlatObjFn = Callable[
