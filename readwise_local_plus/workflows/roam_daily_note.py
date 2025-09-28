@@ -12,12 +12,12 @@ import hashlib
 import json
 from collections import defaultdict
 from datetime import date, datetime
-from typing import Any, TypeAlias
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from readwise_local_plus.config import UserConfig, fetch_user_config
+from readwise_local_plus.config import fetch_user_config
 from readwise_local_plus.db_operations import get_session
 from readwise_local_plus.integrations.roam import RoamBatchAction, RoamClient
 from readwise_local_plus.models import (
@@ -34,43 +34,30 @@ from readwise_local_plus.models import (
 # Highlights are written, by book, underneath this header. Only one header will be
 # added by daily note. No distinction is made by batch, and no ordering under the
 # header is enforced.
-
 HIGHLIGHTS_HEADER = "[[Readwise highlights]]"
-ExtractedHighlight: TypeAlias = dict[
-    str, str | None | datetime | list[dict[str, str | datetime]]
-]
-ExtractedBook: TypeAlias = dict[int,]
 
 
 class RoamDailyNoteHighlightWriter:
-    def __init__(self, highlights_header) -> None:
+    def __init__(self, highlights_header: str) -> None:
         """Object init."""
         self.roam_client = RoamClient()
         self.highlights_header = highlights_header
         self.highlights: dict[date, dict[Book, list[Highlight]]] = defaultdict(dict)
-        self.daily_note_headers = {}
 
-    def write_batch_to_daily_notes(self, batch_id):
+    def write_batch_to_daily_notes(self, batch_id: int) -> None:
         """
         Driver method.
         """
-        self._session: Session = None
+        self._session: Session = get_session(fetch_user_config().db_path)
         self.fetch_highlights(batch_id)
         self._write_highlights()
         self._session.close()
 
-    def fetch_highlights(self, batch_id: int) -> dict[date, dict[int, list[Highlight]]]:
+    def fetch_highlights(self, batch_id: int) -> None:
         """
-        Fetch highlights for a batch, filtered for tweets & articles,
-        grouped by daily note date → book_id → highlights.
-
-        Returns
-        -------
-        dict[date, dict[int, list[Highlight]]]
+        Fetch highlights for a batch, filtered for tweets & articles, grouped by
+        daily note date → book_id → highlights.
         """
-        user_config: UserConfig = fetch_user_config()
-        self._session = get_session(user_config.db_path)
-
         stmt = (
             select(Highlight)
             .join(Highlight.book)
@@ -88,29 +75,32 @@ class RoamDailyNoteHighlightWriter:
 
         highlights = self._session.execute(stmt).scalars().all()
 
-        highlights_by_book: dict[int, list[Highlight]] = defaultdict(list)
+        highlights_by_book: dict[Book, list[Highlight]] = defaultdict(list)
         for hl in highlights:
             highlights_by_book[hl.book].append(hl)
 
-        for book_id, hls in highlights_by_book.items():
+        for book, hls in highlights_by_book.items():
             # Sort by location or created at (e.g. for tweets).
             if hls[0].location is not None:
-                hls.sort(key=lambda h: h.location)
+                hls.sort(key=lambda h: h.location or 0)
             else:
-                hls.sort(key=lambda h: h.created_at)
+                hls.sort(key=lambda h: h.created_at or datetime.min)
 
-            target_date = hls[-1].created_at.date()
-            self.highlights[target_date][book_id] = hls
+            target_date = (
+                hls[-1].created_at.date() if hls[-1].created_at else date.today()
+            )
+            self.highlights[target_date][book] = hls
 
     @staticmethod
-    def stable_hash(obj: dict) -> str:
+    def stable_hash(obj: dict[str, Any]) -> str:
         """Return a stable SHA256 hash for a JSON-serializable object."""
         # sort_keys=True ensures deterministic ordering
         return hashlib.sha256(
             json.dumps(obj, sort_keys=True).encode("utf-8")
         ).hexdigest()
 
-    def _write_highlights(self):
+    def _write_highlights(self) -> None:
+        """Write fetched highlights to Roam daily notes."""
         if not self.highlights:
             return
 
@@ -118,15 +108,12 @@ class RoamDailyNoteHighlightWriter:
         self._session.add(export_batch)
 
         for daily_note, books_and_highlights in self.highlights.items():
-            daily_note_uid = (
-                daily_note
-                if isinstance(daily_note, str)
-                else self.roam_client.date_to_roam_daily_note(daily_note)
-            )
+            daily_note_uid = self.roam_client.date_to_roam_daily_note(daily_note)
 
             existing_page = self._session.get(RoamPage, daily_note_uid)
             roam_batch_action = RoamBatchAction()
 
+            header_uid_candidate: str | int
             if existing_page:
                 header_uid_candidate = existing_page.highlights_header_uid
             else:
@@ -148,6 +135,7 @@ class RoamDailyNoteHighlightWriter:
                     .first()
                 )
 
+                book_block_uid_candidate: str | int
                 if existing_book_export:
                     book_block_uid_candidate = existing_book_export.parent_block_uid
                 else:
@@ -156,7 +144,7 @@ class RoamDailyNoteHighlightWriter:
                     book_block_uid_candidate = (
                         roam_batch_action.append_a_child_block_action(
                             header_uid_candidate,
-                            book.title,
+                            book.title if book.title else "[ERROR]: Missing title",
                             heading=3,
                         )
                     )
@@ -264,16 +252,16 @@ class RoamDailyNoteHighlightWriter:
                     )
                 )
 
-            for snapshot in pending_highlight_snapshots:
-                block_uid = resolve_uid(snapshot["temp_uid"])
-                snapshot_tree = snapshot["block_tree"]
+            for snapshot_d in pending_highlight_snapshots:
+                block_uid = resolve_uid(snapshot_d["temp_uid"])
+                snapshot_tree = snapshot_d["block_tree"]
                 snapshot_tree["uid"] = block_uid
                 self._session.add(
                     RoamHighlightSnapshot(
-                        highlight_id=snapshot["highlight_id"],
+                        highlight_id=snapshot_d["highlight_id"],
                         block_tree=snapshot_tree,
                         block_tree_hash=self.stable_hash(snapshot_tree),
-                        version=snapshot["version"],
+                        version=snapshot_d["version"],
                         created_at=datetime.now(),
                         export_batch=export_batch,
                     )
