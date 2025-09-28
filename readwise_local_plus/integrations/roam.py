@@ -9,7 +9,7 @@ a single use case then it keep in a specific workflow.
 """
 
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 import requests
 
@@ -40,7 +40,7 @@ class TempUidGenerator:
     These are resolved into permanent UIDs on write.
     """
 
-    def __init__(self, start: int = -1):
+    def __init__(self, start: int = -1) -> None:
         if start >= 0:
             raise ValueError("TempUidGenerator must start with a negative integer")
         self._next = start
@@ -50,7 +50,7 @@ class TempUidGenerator:
         self._next -= 1
         return uid
 
-    def reset(self, start: int = -1):
+    def reset(self, start: int = -1) -> None:
         if start >= 0:
             raise ValueError("TempUidGenerator must start with a negative integer")
         self._next = start
@@ -63,7 +63,7 @@ class RoamClient:
 
     BASE_URL = "https://api.roamresearch.com/api/graph"
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialise instance of the class.
         """
@@ -136,7 +136,7 @@ class RoamClient:
         """
         return date.strftime("%m-%d-%Y")
 
-    def fetch_block_subtree(self, root_uid: str) -> dict:
+    def fetch_block_subtree(self, root_uid: str) -> dict[str, Any]:
         """
         Fetch an entire block tree (root + descendants).
 
@@ -157,7 +157,7 @@ class RoamClient:
 
         block = results["result"][0][0]
 
-        def normalize(b):
+        def normalize(b: dict[str, Any]) -> dict[str, Any]:
             return {
                 "uid": b.get(":block/uid"),
                 "text": b.get(":block/string", ""),
@@ -169,7 +169,7 @@ class RoamClient:
 
         return normalize(block)
 
-    def fetch_block_subtrees(self, root_uids: list[str]) -> dict[str, dict]:
+    def fetch_block_subtrees(self, root_uids: list[str]) -> dict[str, dict[str, Any]]:
         """
         Fetch full block trees for multiple root UIDs in one query.
 
@@ -189,7 +189,7 @@ class RoamClient:
         for row in results.get("result", []):
             block = row[0]
 
-            def normalize(b):
+            def normalize(b: dict[str, Any]) -> dict[str, Any]:
                 return {
                     "uid": b.get(":block/uid"),
                     "text": b.get(":block/string", ""),
@@ -203,7 +203,7 @@ class RoamClient:
 
         return trees
 
-    def fetch_child_blocks(self, block_uid) -> list[dict[str, str]] | None:
+    def fetch_child_blocks(self, block_uid: str) -> list[dict[str, str]] | None:
         """
         Pull the text only for direct children of a block.
 
@@ -222,12 +222,16 @@ class RoamClient:
             return None
 
         children = fetched[":block/children"]
-        result = {}
+        result: list[dict[str, str]] = []
         for child_dict in children:
-            result[child_dict[":block/string"]] = child_dict[":block/uid"]
+            if isinstance(child_dict, dict):
+                block_string = child_dict.get(":block/string")
+                block_uid = child_dict.get(":block/uid")
+                if block_string is not None and block_uid is not None:
+                    result.append({str(block_string): str(block_uid)})
         return result
 
-    def fetch_page_uid_from_title(self, page_title: str) -> str:
+    def fetch_page_uid_from_title(self, page_title: str) -> str | None:
         """
         Find the UID of a page.
 
@@ -244,7 +248,7 @@ class RoamClient:
         """
         result = self._query(query, [page_title])
         if result.get("result"):
-            result["result"][0][0]
+            return str(result["result"][0][0])
         else:
             return None
 
@@ -281,12 +285,13 @@ class RoamClient:
             A dict of the selected attrs and their values, if the attr present. E.g.
                 {':node/title': 'August 24th, 2025', ':block/uid': '08-24-2025'}
         """
-        selectors = " ".join(selectors)
+        selectors_str = " ".join(selectors)
         page_name_or_block_text = {
             "eid": f'[:block/uid "{block_uid}"]',
-            "selector": f"[{selectors}]",
+            "selector": f"[{selectors_str}]",
         }
-        return self._post("pull", page_name_or_block_text)["result"]
+        result = self._post("pull", page_name_or_block_text)["result"]
+        return cast(dict[str, str], result)
 
     def write_child_block(
         self,
@@ -295,7 +300,7 @@ class RoamClient:
         *,
         heading: int | None = None,
         open: bool | None = None,
-    ) -> dict | None:
+    ) -> str:
         """
         Add a child block to a block (or page).
 
@@ -346,7 +351,7 @@ class RoamClient:
         }
         response_json = self._write(payload)
         temp_id_for_block = response_json["tempids-to-uids"][str(temp_uid)]
-        return temp_id_for_block
+        return str(temp_id_for_block)
 
 
 class RoamBatchAction:
@@ -354,23 +359,35 @@ class RoamBatchAction:
         self.roam_client = RoamClient()
         self.batch_action_body = self.create_batch_action_body()
 
-    def create_batch_action_body(self):
+    def create_batch_action_body(self) -> dict[str, Any]:
         """Create an empty batch action body."""
         return {"action": "batch-actions", "actions": []}
 
     def append_a_child_block_action(
         self,
-        parent_uid: str,
-        content: list[str],
+        parent_uid: int | str,
+        content: str,
         *,
         heading: int | None = None,
         open: bool | None = None,
-    ) -> str:
+    ) -> int:
         """
+
+        Parameters
+        ----------
+        parent_uid : int | str
+            The UID of the parent block. Roam UIDs are strings, but temp UIDs are
+            negative integers.
+        content : str
+            The content of the block to be added.
+        heading : int, optional
+            The heading level for the block (1, 2, or 3). Defaults to None.
+        open : bool, optional
+            Whether the block state should be open or closed. Defaults to None (closed).
 
         Returns
         -------
-        str
+        int
             The temp_uid of the block.
         """
         temp_uid = self.roam_client._get_temp_uid()
@@ -394,7 +411,7 @@ class RoamBatchAction:
         )
         return temp_uid
 
-    def execute_batch_action(self):
+    def execute_batch_action(self) -> dict[str, str] | None:
         """"""
         response_json = self.roam_client._write(self.batch_action_body)
         # {'tempids-to-uids':

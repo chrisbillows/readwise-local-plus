@@ -12,7 +12,6 @@ from readwise_local_plus.db_operations import (
     update_readwise_last_fetch,
 )
 from readwise_local_plus.integrations.readwise import fetch_from_export_api
-from readwise_local_plus.models import ReadwiseBatch
 from readwise_local_plus.schemas import (
     BookSchemaUnnested,
     BookTagsSchema,
@@ -375,7 +374,7 @@ def update_database_flattened_objects(
     flattened_validated_objs: dict[str, list[dict[str, Any]]],
     start_fetch: datetime,
     end_fetch: datetime,
-) -> ReadwiseBatch:
+) -> int | None:
     """
     Update the database. Expects flattened Readwise objects.
 
@@ -414,7 +413,7 @@ def run_pipeline_flattened_objects(
     flatten_func: FlattenFn = flatten_books_with_highlights,
     validate_flat_objs_func: ValidateFlatObjFn = validate_flattened_objects,
     update_db_func: UpdateDbFlatObjFn = update_database_flattened_objects,
-) -> None | ReadwiseBatch:
+) -> int | None:
     """
     Orchestrate the end-to-end Readwise data sync process.
 
@@ -452,8 +451,8 @@ def run_pipeline_flattened_objects(
     Returns
     -------
     int | None
-        The batch highlights were written in, or None if no writable highlights were
-        found.
+        The batch id of all the highlights and objects written to the database, or None
+        if no writable highlights were found.
     """
     batch_written = None
     raw_books, start_fetch, end_fetch = fetch_func(last_fetch)
@@ -467,7 +466,7 @@ def run_pipeline_flattened_objects(
             )
             # Raw books doesn't not guarantee writable updates. All highlights might
             # already exist in the database.
-            batch_written: int | None = update_db_func(
+            batch_written = update_db_func(
                 session, flat_objs_second_validation, start_fetch, end_fetch
             )
 

@@ -24,7 +24,7 @@ Mapped classes may seem to validate things that they actually don't:
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import JSON, Boolean, ForeignKey, String
 from sqlalchemy.orm import (
@@ -650,7 +650,7 @@ class RoamPageSnapshot(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     page_uid: Mapped[str] = mapped_column(ForeignKey("roam_pages.page_uid"))
-    block_tree: Mapped[dict] = mapped_column(JSON)
+    block_tree: Mapped[dict[str, Any]] = mapped_column(JSON)
     block_tree_hash: Mapped[str]
     version: Mapped[int]
     version_date: Mapped[datetime] = mapped_column(default=lambda: datetime.now())
@@ -746,7 +746,7 @@ class RoamHighlightSnapshot(Base):
     highlight_id: Mapped[int] = mapped_column(
         ForeignKey("roam_highlights.highlight_id")
     )
-    block_tree: Mapped[dict] = mapped_column(JSON)
+    block_tree: Mapped[dict[str, Any]] = mapped_column(JSON)
     block_tree_hash: Mapped[str]
     version: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now())

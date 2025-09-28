@@ -212,7 +212,7 @@ class DatabasePopulaterFlattenedData:
             )
             self.session.add(self._batch)
 
-    def populate_database(self) -> bool:
+    def populate_database(self) -> int | None:
         """
         Populate the database with objects from a Readwise API response.
 
@@ -224,8 +224,8 @@ class DatabasePopulaterFlattenedData:
 
         Return
         ------
-        None | int
-            The number of the batch just written or None if no writeable highlights
+        ReadwiseBatch | None
+            The batch id just written or None if no writeable highlights
             were found.
         """
         for obj_name, raw_objs in self.validated_flattened_objs.items():
@@ -234,7 +234,7 @@ class DatabasePopulaterFlattenedData:
                 self._process_obj(raw_obj, orm_model)
         if self._batch is None:
             return None
-        return self.batch.id
+        return self._batch.id
 
     def _process_obj(self, raw_obj: dict[str, Any], orm_model: Type[Base]) -> None:
         """
@@ -354,7 +354,8 @@ class DatabasePopulaterFlattenedData:
         """
         for field, value in raw_obj.items():
             setattr(existing_obj, field, value)
-        existing_obj.batch = self._batch
+        if self._batch is not None:
+            existing_obj.batch = self._batch
         self.session.add(existing_obj)
 
     def _iterate_version_number(
