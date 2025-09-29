@@ -32,15 +32,11 @@ from readwise_local_plus.models import (
     RoamPageSnapshot,
 )
 
-# Highlights are written, by book, underneath this header. Only one header will be
-# added by daily note. No distinction is made by batch, and no ordering under the
-# header is enforced.
-HIGHLIGHTS_HEADER = "[[Readwise highlights]]"
-
 
 @dataclass
-class PendingBookExport:
-    """Container describing a book block that still needs to be persisted.
+class StagedBookExport:
+    """
+    Book export that will be persisted after the batch action runs.
 
     Attributes
     ----------
@@ -58,8 +54,9 @@ class PendingBookExport:
 
 
 @dataclass
-class PendingHighlightExport:
-    """Container for a highlight export awaiting persistence.
+class StagedHighlightExport:
+    """
+    Highlight export that will be persisted after the batch action runs.
 
     Attributes
     ----------
@@ -80,8 +77,9 @@ class PendingHighlightExport:
 
 
 @dataclass
-class PendingHighlightSnapshot:
-    """Container describing a highlight snapshot that will be inserted.
+class StagedHighlightSnapshot:
+    """
+    Highlight snapshot that will be persisted after the batch action runs.
 
     Attributes
     ----------
@@ -102,41 +100,68 @@ class PendingHighlightSnapshot:
 
 
 @dataclass
-class PendingExports:
-    """Aggregate of pending export artifacts for a daily note.
+class StagedExports:
+    """
+    Aggregate of staged export artifacts for a daily note.
+
+    Collect while processing books and highlights for a daily note page. Reconcile
+    temporary UIDs after the batch action executes, and persist the exports and
+    snapshots.
 
     Attributes
     ----------
-    books : list[PendingBookExport]
+    books : list[StagedBookExport]
         Book exports that need database rows after the batch action executes.
-    highlights : list[PendingHighlightExport]
+    highlights : list[StagedHighlightExport]
         Highlight exports that need database rows after the batch action executes.
-    snapshots : list[PendingHighlightSnapshot]
+    snapshots : list[StagedHighlightSnapshot]
         Highlight snapshots that must be written alongside the exports.
     """
 
-    books: list[PendingBookExport]
-    highlights: list[PendingHighlightExport]
-    snapshots: list[PendingHighlightSnapshot]
+    books: list[StagedBookExport]
+    highlights: list[StagedHighlightExport]
+    snapshots: list[StagedHighlightSnapshot]
 
 
 class RoamDailyNoteHighlightWriter:
-    def __init__(self, highlights_header: str) -> None:
-        """Object init."""
-        self.roam_client = RoamClient()
-        self.highlights_header = highlights_header
-        self.highlights: dict[date, dict[Book, list[Highlight]]] = defaultdict(dict)
+    """
+    Write highlights to Roam daily notes.
+    """
 
-    def write_batch_to_daily_notes(self, batch_id: int) -> None:
+    def __init__(self, batch_id: int) -> None:
+        """
+        Object init.
+
+        Attributes
+        ----------
+        roam_client : RoamClient
+            Client for interacting with the Roam API.
+        highlights_header : str
+            Text for the highlights header block. Highlights are written, by book,
+            underneath this header. Only one header will be added by daily note. No
+            distinction is made by batch, and no ordering under the header is enforced.
+        highlights : dict[date, dict[Book, list[Highlight]]]
+            Fetched highlights grouped by daily note date → book → highlights.
+        _session : Session
+            SQLAlchemy session for database operations.
+        _batch : int
+            Identifier of the ReadwiseBatch whose highlights should be processed.
+        """
+        self.roam_client = RoamClient()
+        self.highlights_header = "[[Readwise highlights]]"
+        self.highlights: dict[date, dict[Book, list[Highlight]]] = defaultdict(dict)
+        self._session: Session = get_session(fetch_user_config().db_path)
+        self._batch = batch_id
+
+    def write_batch_to_daily_notes(self) -> None:
         """
         Driver method.
         """
-        self._session: Session = get_session(fetch_user_config().db_path)
-        self.fetch_highlights(batch_id)
+        self.fetch_highlights()
         self._write_highlights()
         self._session.close()
 
-    def fetch_highlights(self, batch_id: int) -> None:
+    def fetch_highlights(self) -> None:
         """
         Fetch highlights for a batch, filtered for tweets & articles, grouped by
         daily note date → book_id → highlights.
@@ -145,7 +170,7 @@ class RoamDailyNoteHighlightWriter:
             select(Highlight)
             .join(Highlight.book)
             .where(
-                Highlight.batch_id == batch_id,
+                Highlight.batch_id == self._batch,
                 (Book.category == "articles") | (Book.category == "tweets"),
             )
             .options(
@@ -176,20 +201,27 @@ class RoamDailyNoteHighlightWriter:
 
     @staticmethod
     def stable_hash(obj: dict[str, Any]) -> str:
-        """Return a stable SHA256 hash for a JSON-serializable object."""
+        """
+        Return a stable SHA256 hash for a JSON-serializable object.
+
+        Parameters
+        ----------
+        obj : dict[str, Any]
+            JSON-serializable object to hash.
+
+        Returns
+        -------
+        str
+            Hexadecimal SHA256 hash of the object.
+        """
         # sort_keys=True ensures deterministic ordering
         return hashlib.sha256(
             json.dumps(obj, sort_keys=True).encode("utf-8")
         ).hexdigest()
 
     def _write_highlights(self) -> None:
-        """Write fetched highlights to Roam daily notes.
-
-        Returns
-        -------
-        None
-            Performs side effects on the database and the Roam API; no value is
-            returned.
+        """
+        Write fetched highlights to Roam daily notes.
         """
         if not self.highlights:
             return
@@ -235,7 +267,7 @@ class RoamDailyNoteHighlightWriter:
                 open=True,
             )
 
-        pending_exports = self._collect_pending_exports(
+        staged_exports = self._process_books_and_highlights(
             daily_note_uid,
             header_uid_candidate,
             books_and_highlights,
@@ -252,23 +284,25 @@ class RoamDailyNoteHighlightWriter:
             export_batch,
         )
 
-        self._persist_book_exports(pending_exports.books, tempid_map, export_batch)
-        self._persist_highlight_exports(
-            pending_exports.highlights, tempid_map, export_batch
+        self._add_staged_books_to_session(
+            staged_exports.books, tempid_map, export_batch
         )
-        self._persist_highlight_snapshots(
-            pending_exports.snapshots, tempid_map, export_batch
+        self._add_staged_highlights_to_session(
+            staged_exports.highlights, tempid_map, export_batch
+        )
+        self._add_staged_highlight_snapshots_to_session(
+            staged_exports.snapshots, tempid_map, export_batch
         )
 
         self._create_page_snapshot(daily_note_uid, header_uid, page, export_batch)
 
-    def _collect_pending_exports(
+    def _process_books_and_highlights(
         self,
         daily_note_uid: str,
         header_uid_candidate: str | int,
         books_and_highlights: dict[Book, list[Highlight]],
         roam_batch_action: RoamBatchAction,
-    ) -> PendingExports:
+    ) -> StagedExports:
         """Gather pending export artifacts for the supplied highlights.
 
         Parameters
@@ -288,7 +322,7 @@ class RoamDailyNoteHighlightWriter:
             Collections describing the book exports, highlight exports, and
             snapshots that will need persistence once the batch action executes.
         """
-        pending = PendingExports(books=[], highlights=[], snapshots=[])
+        pending = StagedExports(books=[], highlights=[], snapshots=[])
 
         for book, highlights in books_and_highlights.items():
             self._process_book(
@@ -309,7 +343,7 @@ class RoamDailyNoteHighlightWriter:
         book: Book,
         highlights: list[Highlight],
         roam_batch_action: RoamBatchAction,
-        pending: PendingExports,
+        pending: StagedExports,
     ) -> None:
         """Append book-level actions and queue persistence work.
 
@@ -342,7 +376,7 @@ class RoamDailyNoteHighlightWriter:
                 heading=3,
             )
             pending.books.append(
-                PendingBookExport(
+                StagedBookExport(
                     user_book_id=book.user_book_id,
                     page_uid=daily_note_uid,
                     temp_uid=book_block_uid_candidate,
@@ -364,7 +398,7 @@ class RoamDailyNoteHighlightWriter:
         book_block_uid_candidate: str | int,
         highlight: Highlight,
         roam_batch_action: RoamBatchAction,
-        pending: PendingExports,
+        pending: StagedExports,
     ) -> None:
         """Queue write actions and persistence for an individual highlight.
 
@@ -393,7 +427,7 @@ class RoamDailyNoteHighlightWriter:
             highlight.text,
         )
         pending.highlights.append(
-            PendingHighlightExport(
+            StagedHighlightExport(
                 highlight_id=highlight.id,
                 page_uid=daily_note_uid,
                 temp_uid=temp_uid,
@@ -411,7 +445,7 @@ class RoamDailyNoteHighlightWriter:
             "children": [],
         }
         pending.snapshots.append(
-            PendingHighlightSnapshot(
+            StagedHighlightSnapshot(
                 highlight_id=highlight.id,
                 temp_uid=temp_uid,
                 block_tree=block_tree,
@@ -507,13 +541,14 @@ class RoamDailyNoteHighlightWriter:
         existing_page.export_batch = export_batch
         return existing_page
 
-    def _persist_book_exports(
+    def _add_staged_books_to_session(
         self,
-        book_exports: list[PendingBookExport],
+        book_exports: list[StagedBookExport],
         tempid_map: dict[str, str],
         export_batch: RoamExportBatch,
     ) -> None:
-        """Persist book exports using resolved UIDs.
+        """
+        Add staged book exports to the session using resolved UIDs.
 
         Parameters
         ----------
@@ -524,9 +559,6 @@ class RoamDailyNoteHighlightWriter:
         export_batch : RoamExportBatch
             Batch to associate with the persisted exports.
 
-        Returns
-        -------
-        None
         """
         for export in book_exports:
             parent_uid = self._resolve_uid(tempid_map, export.temp_uid)
@@ -539,26 +571,24 @@ class RoamDailyNoteHighlightWriter:
                 )
             )
 
-    def _persist_highlight_exports(
+    def _add_staged_highlights_to_session(
         self,
-        highlight_exports: list[PendingHighlightExport],
+        highlight_exports: list[StagedHighlightExport],
         tempid_map: dict[str, str],
         export_batch: RoamExportBatch,
     ) -> None:
-        """Persist highlight exports using resolved UIDs.
+        """
+        Add staged highlight exports to the session using resolved UIDs.
 
         Parameters
         ----------
-        highlight_exports : list[PendingHighlightExport]
-            Pending highlight exports to persist.
+        highlight_exports : list[StagedHighlightExport]
+            Staged highlight exports to persist.
         tempid_map : dict[str, str]
             Mapping of temporary IDs to resolved Roam UIDs.
         export_batch : RoamExportBatch
             Batch to associate with the persisted exports.
 
-        Returns
-        -------
-        None
         """
         for export in highlight_exports:
             block_uid = self._resolve_uid(tempid_map, export.temp_uid)
@@ -572,26 +602,24 @@ class RoamDailyNoteHighlightWriter:
                 )
             )
 
-    def _persist_highlight_snapshots(
+    def _add_staged_highlight_snapshots_to_session(
         self,
-        snapshots: list[PendingHighlightSnapshot],
+        snapshots: list[StagedHighlightSnapshot],
         tempid_map: dict[str, str],
         export_batch: RoamExportBatch,
     ) -> None:
-        """Persist highlight snapshots using resolved UIDs.
+        """
+        Add staged highlight snapshots to the session using resolved UIDs.
 
         Parameters
         ----------
-        snapshots : list[PendingHighlightSnapshot]
-            Pending highlight snapshots to persist.
+        snapshots : list[StagedHighlightSnapshot]
+            Staged highlight snapshots to persist.
         tempid_map : dict[str, str]
             Mapping of temporary IDs to resolved Roam UIDs.
         export_batch : RoamExportBatch
             Batch to associate with the persisted exports.
 
-        Returns
-        -------
-        None
         """
         for snapshot_pending in snapshots:
             block_uid = self._resolve_uid(tempid_map, snapshot_pending.temp_uid)
@@ -608,6 +636,7 @@ class RoamDailyNoteHighlightWriter:
                 )
             )
 
+    #! Can't we just remove page, and then only create a page if it doesn't exist?
     def _create_page_snapshot(
         self,
         daily_note_uid: str,
@@ -615,7 +644,8 @@ class RoamDailyNoteHighlightWriter:
         page: RoamPage,
         export_batch: RoamExportBatch,
     ) -> None:
-        """Create a new page snapshot by fetching the latest Roam block tree.
+        """
+        Create a new page snapshot by fetching the latest Roam block tree.
 
         Parameters
         ----------
@@ -628,9 +658,6 @@ class RoamDailyNoteHighlightWriter:
         export_batch : RoamExportBatch
             Batch that should be associated with the snapshot.
 
-        Returns
-        -------
-        None
         """
         block_tree = self.roam_client.fetch_block_subtree(header_uid)
         snapshot = RoamPageSnapshot(
@@ -646,7 +673,8 @@ class RoamDailyNoteHighlightWriter:
     def _get_existing_book_export(
         self, daily_note_uid: str, user_book_id: int
     ) -> RoamBookExport | None:
-        """Fetch an existing book export for the specified page and book.
+        """
+        Fetch an existing book export for the specified page and book.
 
         Parameters
         ----------
@@ -657,8 +685,8 @@ class RoamDailyNoteHighlightWriter:
 
         Returns
         -------
-        RoamBookExport or None
-            Existing export record if present, otherwise ``None``.
+        RoamBookExport | None
+            Existing export record if present, otherwise `None`.
         """
         return (
             self._session.query(RoamBookExport)
@@ -669,7 +697,8 @@ class RoamDailyNoteHighlightWriter:
     def _get_existing_highlight_export(
         self, daily_note_uid: str, highlight_id: int
     ) -> RoamHighlightExport | None:
-        """Fetch an existing highlight export for the specified page and highlight.
+        """
+        Fetch an existing highlight export for the specified page and highlight.
 
         Parameters
         ----------
@@ -680,8 +709,8 @@ class RoamDailyNoteHighlightWriter:
 
         Returns
         -------
-        RoamHighlightExport or None
-            Existing export record if present, otherwise ``None``.
+        RoamHighlightExport | None
+            Existing export record if present, otherwise `None`.
         """
         return (
             self._session.query(RoamHighlightExport)
@@ -692,7 +721,8 @@ class RoamDailyNoteHighlightWriter:
     def _get_last_highlight_snapshot(
         self, highlight_id: int
     ) -> RoamHighlightSnapshot | None:
-        """Fetch the most recent snapshot for a highlight.
+        """
+        Fetch the most recent snapshot for a highlight.
 
         Parameters
         ----------
@@ -701,8 +731,8 @@ class RoamDailyNoteHighlightWriter:
 
         Returns
         -------
-        RoamHighlightSnapshot or None
-            Most recent snapshot instance, or ``None`` if none exist.
+        RoamHighlightSnapshot | None
+            Most recent snapshot instance, or `None` if none exist.
         """
         return (
             self._session.query(RoamHighlightSnapshot)
@@ -713,7 +743,7 @@ class RoamDailyNoteHighlightWriter:
 
 
 if __name__ == "__main__":
-    r = RoamDailyNoteHighlightWriter("Delete Me")
+    r = RoamDailyNoteHighlightWriter(batch_id=8)
     # Batch 3 has two daily notes: 15th July and 14th August
     # Batch 8 has one: 7th September
-    r.write_batch_to_daily_notes(batch_id=3)
+    r.write_batch_to_daily_notes()

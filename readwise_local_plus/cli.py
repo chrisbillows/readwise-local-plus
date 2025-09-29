@@ -162,7 +162,8 @@ def main(user_config: Optional[UserConfig] = None) -> None:
             print("Batch written was: ", batch_written)
             if batch_written:
                 print("This would trigger writing to Roam!")
-                pass
+                # rdw = RoamDailyNoteWriter()
+                # rdw.write_batch_to_daily_notes(batch_written)
 
     elif args.command == "list-invalids":
         list_invalid_db_objects(user_config)
