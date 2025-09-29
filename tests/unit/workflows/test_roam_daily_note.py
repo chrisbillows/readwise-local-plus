@@ -13,10 +13,7 @@ from readwise_local_plus.models import (
     RoamHighlightExport,
     RoamPage,
 )
-from readwise_local_plus.workflows.roam_daily_note import (
-    HIGHLIGHTS_HEADER,
-    RoamDailyNoteHighlightWriter,
-)
+from readwise_local_plus.workflows.roam_daily_note import RoamDailyNoteHighlightWriter
 
 
 class TestRoamDailyNoteHighlightWriter:
@@ -25,9 +22,9 @@ class TestRoamDailyNoteHighlightWriter:
     @patch("readwise_local_plus.workflows.roam_daily_note.RoamClient")
     def test_init(self, mock_roam_client):
         """Test initialization of RoamDailyNoteHighlightWriter."""
-        writer = RoamDailyNoteHighlightWriter("Test Header")
+        writer = RoamDailyNoteHighlightWriter(123)
 
-        assert writer.highlights_header == "Test Header"
+        assert writer.highlights_header == "[[Readwise highlights]]"
         assert isinstance(writer.highlights, defaultdict)
         assert len(writer.highlights) == 0
         mock_roam_client.assert_called_once()
@@ -96,15 +93,15 @@ class TestRoamDailyNoteHighlightWriter:
         mock_session = Mock()
         mock_get_session.return_value = mock_session
 
-        writer = RoamDailyNoteHighlightWriter("Test Header")
+        writer = RoamDailyNoteHighlightWriter(123)
         writer.fetch_highlights = Mock()
         writer._write_highlights = Mock()
 
         # Call method
-        writer.write_batch_to_daily_notes(123)
+        writer.write_batch_to_daily_notes()
 
         # Verify calls
-        writer.fetch_highlights.assert_called_once_with(123)
+        writer.fetch_highlights.assert_called_once()
         writer._write_highlights.assert_called_once()
         mock_session.close.assert_called_once()
 
@@ -165,9 +162,9 @@ class TestRoamDailyNoteHighlightWriter:
         mock_result.scalars.return_value.all.return_value = highlights
         mock_session.execute.return_value = mock_result
 
-        writer = RoamDailyNoteHighlightWriter("Test Header")
+        writer = RoamDailyNoteHighlightWriter(123)
         writer._session = mock_session  # Set session directly for unit test
-        writer.fetch_highlights(123)
+        writer.fetch_highlights()
 
         # Verify the highlights were grouped correctly
         assert len(writer.highlights) == 2  # Two different dates
@@ -208,9 +205,9 @@ class TestRoamDailyNoteHighlightWriter:
         mock_result.scalars.return_value.all.return_value = []
         mock_session.execute.return_value = mock_result
 
-        writer = RoamDailyNoteHighlightWriter("Test Header")
+        writer = RoamDailyNoteHighlightWriter(123)
         writer._session = mock_session  # Set session directly for unit test
-        writer.fetch_highlights(123)
+        writer.fetch_highlights()
 
         # Should have no highlights
         assert len(writer.highlights) == 0
@@ -254,7 +251,7 @@ class TestRoamDailyNoteHighlightWriter:
         mock_datetime.now.return_value = fixed_datetime
 
         # Setup writer with test data
-        writer = RoamDailyNoteHighlightWriter("Test Header")
+        writer = RoamDailyNoteHighlightWriter(123)
         writer._session = Mock()
 
         # Create mock roam client
@@ -345,7 +342,7 @@ class TestRoamDailyNoteHighlightWriter:
 
         # Verify header creation call
         header_call = mock_batch_action.append_a_child_block_action.call_args_list[0]
-        assert header_call[0] == ("01-15-2023", "Test Header")
+        assert header_call[0] == ("01-15-2023", "[[Readwise highlights]]")
         assert header_call[1] == {"heading": 1, "open": True}
 
         # Verify book creation call
@@ -685,12 +682,3 @@ class TestRoamDailyNoteHighlightWriter:
             # Check that error message is used for book title
             book_call = mock_batch_action.append_a_child_block_action.call_args_list[1]
             assert book_call[0] == (-1, "[ERROR]: Missing title")
-
-
-class TestConstants:
-    """Test module-level constants."""
-
-    def test_highlights_header_constant(self):
-        """Test HIGHLIGHTS_HEADER constant."""
-        assert HIGHLIGHTS_HEADER == "[[Readwise highlights]]"
-        assert isinstance(HIGHLIGHTS_HEADER, str)

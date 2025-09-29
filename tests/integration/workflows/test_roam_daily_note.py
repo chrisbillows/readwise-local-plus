@@ -16,10 +16,7 @@ from readwise_local_plus.models import (
     RoamHighlightSnapshot,
     RoamPage,
 )
-from readwise_local_plus.workflows.roam_daily_note import (
-    HIGHLIGHTS_HEADER,
-    RoamDailyNoteHighlightWriter,
-)
+from readwise_local_plus.workflows.roam_daily_note import RoamDailyNoteHighlightWriter
 
 
 @pytest.fixture
@@ -133,9 +130,9 @@ class TestRoamDailyNoteIntegration:
             mock_get_session.return_value = session
             mock_fetch_config.return_value = mock_roam_config
 
-            writer = RoamDailyNoteHighlightWriter("Test Header")
+            writer = RoamDailyNoteHighlightWriter(batch_id=batch_id)
             writer._session = session  # Set session directly for testing
-            writer.fetch_highlights(batch_id)
+            writer.fetch_highlights()
 
             # Verify highlights were fetched and grouped correctly
             assert len(writer.highlights) == 2  # Two different dates
@@ -217,8 +214,8 @@ class TestRoamDailyNoteIntegration:
             mock_roam_client_class.return_value = mock_roam_client
 
             # Create writer and run workflow
-            writer = RoamDailyNoteHighlightWriter(HIGHLIGHTS_HEADER)
-            writer.write_batch_to_daily_notes(batch_id)
+            writer = RoamDailyNoteHighlightWriter(batch_id=batch_id)
+            writer.write_batch_to_daily_notes()
 
             # Verify data was written to database
             # Check RoamExportBatch was created
@@ -265,7 +262,7 @@ class TestRoamDailyNoteIntegration:
         existing_page = RoamPage(
             page_uid="01-15-2023",
             highlights_header_uid="existing-header-uid",
-            highlights_header_text=HIGHLIGHTS_HEADER,
+            highlights_header_text="[[Readwise highlights]]",
         )
         session.add(existing_page)
         session.commit()
@@ -306,8 +303,8 @@ class TestRoamDailyNoteIntegration:
             }
             mock_roam_client_class.return_value = mock_roam_client
 
-            writer = RoamDailyNoteHighlightWriter(HIGHLIGHTS_HEADER)
-            writer.write_batch_to_daily_notes(batch_id)
+            writer = RoamDailyNoteHighlightWriter(batch_id=batch_id)
+            writer.write_batch_to_daily_notes()
 
             # Verify existing page was used (not duplicated)
             roam_pages = session.query(RoamPage).filter_by(page_uid="01-15-2023").all()
@@ -324,7 +321,7 @@ class TestRoamDailyNoteIntegration:
         existing_page = RoamPage(
             page_uid="01-15-2023",
             highlights_header_uid="existing-header-uid",
-            highlights_header_text=HIGHLIGHTS_HEADER,
+            highlights_header_text="[[Readwise highlights]]",
         )
 
         # Pre-create some exports to simulate partial existing state
@@ -384,8 +381,8 @@ class TestRoamDailyNoteIntegration:
             }
             mock_roam_client_class.return_value = mock_roam_client
 
-            writer = RoamDailyNoteHighlightWriter(HIGHLIGHTS_HEADER)
-            writer.write_batch_to_daily_notes(batch_id)
+            writer = RoamDailyNoteHighlightWriter(batch_id=batch_id)
+            writer.write_batch_to_daily_notes()
 
             # Verify existing exports were not duplicated
             book_exports = session.query(RoamBookExport).filter_by(user_book_id=1).all()
@@ -458,7 +455,7 @@ class TestRoamDailyNoteIntegration:
         roam_page = RoamPage(
             page_uid="01-15-2023",
             highlights_header_uid="existing-header-uid",
-            highlights_header_text=HIGHLIGHTS_HEADER,
+            highlights_header_text="[[Readwise highlights]]",
         )
         roam_highlight = RoamHighlightExport(
             highlight_id=1,
@@ -496,8 +493,8 @@ class TestRoamDailyNoteIntegration:
             mock_fetch_config.return_value = mock_roam_config
             mock_roam_client_class.return_value = Mock()
 
-            writer = RoamDailyNoteHighlightWriter("Test")
-            assert writer.highlights_header == "Test"
+            writer = RoamDailyNoteHighlightWriter(batch_id=123)
+            assert writer.highlights_header == "[[Readwise highlights]]"
             mock_roam_client_class.assert_called_once_with()
 
             # Test the versioning logic by directly accessing the database
@@ -531,12 +528,12 @@ class TestRoamDailyNoteIntegration:
             mock_get_session.return_value = mock_session
             mock_fetch_config.return_value = mock_roam_config
 
-            writer = RoamDailyNoteHighlightWriter("Test")
+            writer = RoamDailyNoteHighlightWriter(batch_id=123)
             writer._session = mock_session  # Set the mock session
 
             # Should propagate database errors
             with pytest.raises(Exception, match="Database connection failed"):
-                writer.fetch_highlights(123)
+                writer.fetch_highlights()
 
     def test_session_lifecycle_integration(self, mock_roam_config):
         """Integration test for proper session lifecycle management."""
@@ -553,11 +550,11 @@ class TestRoamDailyNoteIntegration:
             mock_get_session.return_value = mock_session
             mock_fetch_config.return_value = mock_roam_config
 
-            writer = RoamDailyNoteHighlightWriter("Test")
+            writer = RoamDailyNoteHighlightWriter(batch_id=123)
             writer.fetch_highlights = Mock()  # Mock to avoid database setup
             writer._write_highlights = Mock()  # Mock to avoid Roam API calls
 
-            writer.write_batch_to_daily_notes(123)
+            writer.write_batch_to_daily_notes()
 
             # Verify session lifecycle
             assert writer._session is mock_session
@@ -570,9 +567,5 @@ class TestRoamDailyNoteConstants:
     def test_highlights_header_used_in_integration(self, mock_roam_config):
         """Test that HIGHLIGHTS_HEADER constant is properly used in integration."""
         with patch("readwise_local_plus.workflows.roam_daily_note.RoamClient"):
-            writer = RoamDailyNoteHighlightWriter(HIGHLIGHTS_HEADER)
+            writer = RoamDailyNoteHighlightWriter(batch_id=123)
             assert writer.highlights_header == "[[Readwise highlights]]"
-
-            # Test with custom header
-            custom_writer = RoamDailyNoteHighlightWriter("Custom Header")
-            assert custom_writer.highlights_header == "Custom Header"
