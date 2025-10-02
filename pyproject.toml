@@ -16,6 +16,7 @@ dependencies = [
     "requests",
     "rich",
     "sqlalchemy",
+    "tldextract",
     "types-requests",
 ]
 [project.optional-dependencies]

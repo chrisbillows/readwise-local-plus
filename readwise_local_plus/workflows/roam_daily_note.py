@@ -11,7 +11,7 @@ Currently only tweets and articles (hardcoded) are actioned.
 import hashlib
 import json
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
@@ -54,73 +54,57 @@ class StagedBookExport:
 
 
 @dataclass
-class StagedHighlightExport:
-    """
-    Highlight export that will be persisted after the batch action runs.
+class HighlightBlockSpec:
+    """Describe a Roam block to be created for a highlight."""
 
-    Attributes
-    ----------
-    highlight_id : int
-        Identifier of the Readwise highlight.
-    page_uid : str
-        UID of the daily note that owns the highlight block.
-    temp_uid : str | int
-        Temporary UID for the highlight block, to be resolved post-execution.
-    export_date : datetime
-        Timestamp that should be stored on the export record.
-    """
+    text: str
+    heading: int | None = None
+    open: bool | None = None
+    is_primary: bool = False
+    children: list["HighlightBlockSpec"] = field(default_factory=list)
+
+
+@dataclass
+class HighlightBlockPlan:
+    """Plan describing how to render a highlight into Roam blocks."""
+
+    root: HighlightBlockSpec
+
+
+@dataclass
+class StagedHighlightExport:
+    """Highlight export that will be persisted after the batch action runs."""
 
     highlight_id: int
     page_uid: str
-    temp_uid: str | int
+    primary_temp_uid: str | int
     export_date: datetime
 
 
 @dataclass
 class StagedHighlightSnapshot:
-    """
-    Highlight snapshot that will be persisted after the batch action runs.
-
-    Attributes
-    ----------
-    highlight_id : int
-        Identifier of the Readwise highlight the snapshot belongs to.
-    temp_uid : str | int
-        Temporary UID for the snapshot's block tree root.
-    block_tree : dict[str, Any]
-        Minimal block tree representation to persist.
-    version : int
-        Next version that should be assigned to the snapshot record.
-    """
+    """Highlight snapshot data staged until temp UIDs are resolved."""
 
     highlight_id: int
-    temp_uid: str | int
     block_tree: dict[str, Any]
     version: int
 
 
 @dataclass
 class StagedExports:
-    """
-    Aggregate of staged export artifacts for a daily note.
-
-    Collect while processing books and highlights for a daily note page. Reconcile
-    temporary UIDs after the batch action executes, and persist the exports and
-    snapshots.
-
-    Attributes
-    ----------
-    books : list[StagedBookExport]
-        Book exports that need database rows after the batch action executes.
-    highlights : list[StagedHighlightExport]
-        Highlight exports that need database rows after the batch action executes.
-    snapshots : list[StagedHighlightSnapshot]
-        Highlight snapshots that must be written alongside the exports.
-    """
+    """Aggregate of staged export artifacts for a daily note."""
 
     books: list[StagedBookExport]
     highlights: list[StagedHighlightExport]
     snapshots: list[StagedHighlightSnapshot]
+
+
+@dataclass
+class HighlightBlockRenderResult:
+    """Result of rendering a highlight block plan into batch actions."""
+
+    primary_temp_uid: str | int
+    block_tree: dict[str, Any]
 
 
 class RoamDailyNoteHighlightWriter:
@@ -198,6 +182,74 @@ class RoamDailyNoteHighlightWriter:
                 hls[-1].created_at.date() if hls[-1].created_at else date.today()
             )
             self.highlights[target_date][book] = hls
+
+    def create_formatted_book_header_by_category(self, book: Book) -> str:
+        """
+        Create a header block for a book highlight.
+
+        Parameters
+        ----------
+        book : Book
+            The book for which to create the header.
+
+        Returns
+        -------
+        str
+            Formatted header string for the book.
+        """
+        if not book.title:
+            return "[ERROR]: Missing title"
+
+        # Tweets and tweet threads.
+        if book.category == "tweets":
+            if not book.title.lower().startswith("tweets from"):
+                author = book.author.split(" ")[0][1:] if book.author else "unknown"
+                title = f"Tweet Thread From {author}"
+            else:
+                title = book.title
+            return f"{title} #tweets #rw"
+
+        if book.category == "articles":
+            return book.title
+
+        # Fallback for other categories (if any).
+        return book.title
+
+    def create_formatted_highlight_by_category(
+        self, highlight: Highlight
+    ) -> HighlightBlockPlan:
+        """Return a block plan representing the highlight.
+
+        Parameters
+        ----------
+        highlight : Highlight
+            The highlight to format.
+
+        Returns
+        -------
+        HighlightBlockPlan
+            Block plan describing how to render the highlight.
+        """
+        text = highlight.text or "[ERROR]: Missing highlight text"
+
+        book = getattr(highlight, "book", None)
+
+        # Tweets: include the source URL (if available) as the parent block, with the
+        # highlight text nested underneath. This keeps the primary export tied to the
+        # text block while preserving the contextual link.
+        if book and getattr(book, "category", None) == "tweets":
+            url = getattr(highlight, "source_url", None)
+
+            text_block = HighlightBlockSpec(text=text, is_primary=True)
+
+            if url:
+                root = HighlightBlockSpec(text=url, children=[text_block])
+                return HighlightBlockPlan(root=root)
+
+            return HighlightBlockPlan(root=text_block)
+
+        # Default behaviour: single block containing the highlight text.
+        return HighlightBlockPlan(root=HighlightBlockSpec(text=text, is_primary=True))
 
     @staticmethod
     def stable_hash(obj: dict[str, Any]) -> str:
@@ -370,9 +422,10 @@ class RoamDailyNoteHighlightWriter:
         if existing_book_export:
             book_block_uid_candidate: str | int = existing_book_export.parent_block_uid
         else:
+            book_header = self.create_formatted_book_header_by_category(book)
             book_block_uid_candidate = roam_batch_action.append_a_child_block_action(
                 header_uid_candidate,
-                book.title if book.title else "[ERROR]: Missing title",
+                book_header,
                 heading=3,
             )
             pending.books.append(
@@ -400,7 +453,8 @@ class RoamDailyNoteHighlightWriter:
         roam_batch_action: RoamBatchAction,
         pending: StagedExports,
     ) -> None:
-        """Queue write actions and persistence for an individual highlight.
+        """
+        Queue write actions and persistence for an individual highlight.
 
         Parameters
         ----------
@@ -422,15 +476,32 @@ class RoamDailyNoteHighlightWriter:
         if existing_export:
             return
 
-        temp_uid = roam_batch_action.append_a_child_block_action(
+        # We can do type filtering here can't we? So we add custom logic for a highlight
+        # when we want multiple "lines", e.g. the tweet link on a line, and the tweet
+        # text nested beneath it.
+        # ADD A `highlight_child` bool to this method.
+
+        # if highlighted_child:
+        #     pass
+
+        # or maybe it's
+        # formatted_highlight, highlight_child = self.create_formatted_highlight_by_category(highlight)
+        # That could be a bool and later we do if highlight_child, then we call the logic - it might be better
+        # to have pass the text into this method, and make this a generalised method that just appends a block
+        # to a book.  Then the logic would just be at the process_book level?
+
+        plan = self.create_formatted_highlight_by_category(highlight)
+        render_result = self._render_highlight_block_tree(
             book_block_uid_candidate,
-            highlight.text,
+            plan.root,
+            roam_batch_action,
         )
+
         pending.highlights.append(
             StagedHighlightExport(
                 highlight_id=highlight.id,
                 page_uid=daily_note_uid,
-                temp_uid=temp_uid,
+                primary_temp_uid=render_result.primary_temp_uid,
                 export_date=datetime.now(),
             )
         )
@@ -438,19 +509,51 @@ class RoamDailyNoteHighlightWriter:
         last_snapshot = self._get_last_highlight_snapshot(highlight.id)
         next_version = (last_snapshot.version + 1) if last_snapshot else 1
 
-        block_tree = {
-            "uid": temp_uid,
-            "text": highlight.text,
-            "order": None,
-            "children": [],
-        }
         pending.snapshots.append(
             StagedHighlightSnapshot(
                 highlight_id=highlight.id,
-                temp_uid=temp_uid,
-                block_tree=block_tree,
+                block_tree=render_result.block_tree,
                 version=next_version,
             )
+        )
+
+    def _render_highlight_block_tree(
+        self,
+        parent_uid: str | int,
+        block_spec: HighlightBlockSpec,
+        roam_batch_action: RoamBatchAction,
+    ) -> HighlightBlockRenderResult:
+        temp_uid = roam_batch_action.append_a_child_block_action(
+            parent_uid,
+            block_spec.text,
+            heading=block_spec.heading,
+            open=block_spec.open,
+        )
+
+        children: list[dict[str, Any]] = []
+        block_tree: dict[str, Any] = {
+            "uid": temp_uid,
+            "text": block_spec.text,
+            "order": None,
+            "children": children,
+        }
+
+        primary_temp_uid: str | int | None = temp_uid if block_spec.is_primary else None
+
+        for child_spec in block_spec.children:
+            child_result = self._render_highlight_block_tree(
+                temp_uid, child_spec, roam_batch_action
+            )
+            children.append(child_result.block_tree)
+            if primary_temp_uid is None:
+                primary_temp_uid = child_result.primary_temp_uid
+
+        if primary_temp_uid is None:
+            primary_temp_uid = temp_uid
+
+        return HighlightBlockRenderResult(
+            primary_temp_uid=primary_temp_uid,
+            block_tree=block_tree,
         )
 
     def _execute_batch_action(
@@ -591,7 +694,7 @@ class RoamDailyNoteHighlightWriter:
 
         """
         for export in highlight_exports:
-            block_uid = self._resolve_uid(tempid_map, export.temp_uid)
+            block_uid = self._resolve_uid(tempid_map, export.primary_temp_uid)
             self._session.add(
                 RoamHighlightExport(
                     highlight_id=export.highlight_id,
@@ -622,9 +725,9 @@ class RoamDailyNoteHighlightWriter:
 
         """
         for snapshot_pending in snapshots:
-            block_uid = self._resolve_uid(tempid_map, snapshot_pending.temp_uid)
-            snapshot_tree = snapshot_pending.block_tree
-            snapshot_tree["uid"] = block_uid
+            snapshot_tree = self._resolve_block_tree(
+                snapshot_pending.block_tree, tempid_map
+            )
             self._session.add(
                 RoamHighlightSnapshot(
                     highlight_id=snapshot_pending.highlight_id,
@@ -669,6 +772,21 @@ class RoamDailyNoteHighlightWriter:
             export_batch=export_batch,
         )
         self._session.add(snapshot)
+
+    def _resolve_block_tree(
+        self, block_tree: dict[str, Any], tempid_map: dict[str, str]
+    ) -> dict[str, Any]:
+        resolved_uid = self._resolve_uid(tempid_map, block_tree["uid"])
+        resolved_children = [
+            self._resolve_block_tree(child, tempid_map)
+            for child in block_tree.get("children", [])
+        ]
+        resolved_tree = {
+            **block_tree,
+            "uid": resolved_uid,
+            "children": resolved_children,
+        }
+        return resolved_tree
 
     def _get_existing_book_export(
         self, daily_note_uid: str, user_book_id: int
@@ -743,7 +861,7 @@ class RoamDailyNoteHighlightWriter:
 
 
 if __name__ == "__main__":
-    r = RoamDailyNoteHighlightWriter(batch_id=8)
+    r = RoamDailyNoteHighlightWriter(batch_id=3)
     # Batch 3 has two daily notes: 15th July and 14th August
     # Batch 8 has one: 7th September
     r.write_batch_to_daily_notes()
