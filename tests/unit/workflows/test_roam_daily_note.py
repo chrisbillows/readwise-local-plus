@@ -4,6 +4,7 @@ import hashlib
 import json
 from collections import defaultdict
 from datetime import date, datetime
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from readwise_local_plus.models import (
@@ -264,13 +265,20 @@ class TestRoamDailyNoteHighlightWriter:
         writer.roam_client = mock_client
 
         # Create test book and highlights
-        mock_book = Mock(spec=Book)
+        class DummyBook:
+            pass
+
+        mock_book = DummyBook()
         mock_book.user_book_id = 1
         mock_book.title = "Test Book"
+        mock_book.category = "articles"
+        mock_book.author = "Author Example"
 
-        mock_highlight = Mock(spec=Highlight)
-        mock_highlight.id = 1
-        mock_highlight.text = "Test highlight text"
+        mock_highlight = SimpleNamespace(
+            id=1,
+            text="Test highlight text",
+            location=None,
+        )
 
         test_date = date(2023, 1, 15)
         writer.highlights = {test_date: {mock_book: [mock_highlight]}}
@@ -367,13 +375,20 @@ class TestRoamDailyNoteHighlightWriter:
         writer._session = Mock()
 
         # Create test data
-        mock_book = Mock(spec=Book)
+        class DummyBook:
+            pass
+
+        mock_book = DummyBook()
         mock_book.user_book_id = 1
         mock_book.title = "Test Book"
+        mock_book.category = "articles"
+        mock_book.author = "Author Example"
 
-        mock_highlight = Mock(spec=Highlight)
-        mock_highlight.id = 1
-        mock_highlight.text = "Test highlight"
+        mock_highlight = SimpleNamespace(
+            id=1,
+            text="Test highlight",
+            location=None,
+        )
 
         test_date = date(2023, 1, 15)
         writer.highlights = {test_date: {mock_book: [mock_highlight]}}

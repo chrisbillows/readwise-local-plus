@@ -8,12 +8,27 @@ The rule of thumb is reuse - if the functionality is unique, or likely to be uni
 a single use case then it keep in a specific workflow.
 """
 
+import logging
 from datetime import date
-from typing import Any, cast
+from typing import Any, Iterable, cast
 
 import requests
+from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
 from readwise_local_plus.config import fetch_user_config
+from readwise_local_plus.db_operations import get_session
+from readwise_local_plus.models import (
+    RoamBookExport,
+    RoamExportBatch,
+    RoamHighlightExport,
+    RoamHighlightSnapshot,
+    RoamPage,
+    RoamPageSnapshot,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class RoamAPIError(Exception):
@@ -411,6 +426,16 @@ class RoamBatchAction:
         )
         return temp_uid
 
+    def append_delete_block_action(self, block_uid: str) -> None:
+        """Queue a delete-block action for the supplied UID."""
+
+        self.batch_action_body.setdefault("actions", []).append(
+            {
+                "action": "delete-block",
+                "block": {"uid": block_uid},
+            }
+        )
+
     def execute_batch_action(self) -> dict[str, str] | None:
         """"""
         response_json = self.roam_client._write(self.batch_action_body)
@@ -425,160 +450,104 @@ class RoamBatchAction:
         return response_json["tempids-to-uids"] if response_json else None
 
 
-# from readwise_local_plus.config import UserConfig, fetch_user_config
-# from readwise_local_plus.db_operations import get_session
-# from readwise_local_plus.models import RoamPage, RoamHighlightExport
-# from sqlalchemy import select
-# from sqlalchemy.orm import Session
+def delete_roam_export_batch(
+    batch_id: int,
+    *,
+    session: Session | None = None,
+) -> None:
+    """Delete a Roam export batch, removing Roam blocks and database records.
 
+    Parameters
+    ----------
+    batch_id : int
+        Primary key of the ``RoamExportBatch`` to delete.
+    session : Session, optional
+        Existing SQLAlchemy session. If omitted, a new session is created using the
+        configured database path.
+    """
 
-# class RoamDBWriter:
+    owns_session = False
+    if session is None:
+        config = fetch_user_config()
+        session = get_session(config.db_path)
+        owns_session = True
 
-#     def __init__(self, header: str, highlights: dict):
-#         """"""
-#         self.header: str = header
-#         self.highlights = highlights
-#         self.roam_client: RoamClient = RoamClient()
-#         self.user_config: UserConfig = fetch_user_config()
-#         self.session: Session = get_session(self.user_config.db_path)
-#         self.process_highlights()
+    assert session is not None  # for static type checkers
 
-#     def process_highlights(self):
-#         """"""
-#         roam_pages = {}
-#         for daily_note, books in self.highlights.items():
-#             # Batch roam and db writes by daily note page.
-#             roam_batch_action = RoamBatchAction()
-#             # existing_page = self.session.get(RoamPage, daily_note)
-#             existing_page = None
-#             header_exists, header_uid = self._handle_header(
-#                     existing_page, daily_note, roam_batch_action
-#                 )
-#             temp_uids, batch_action_body = self._write_highlights_to_roam_daily_note(
-#                 books, header_uid, roam_batch_action
-#                 )
-#             self._update_roam_export_db(temp_uids, batch_action_body)
-#             roam_page = RoamPage(
-#                 page_uid = daily_note,
-#                 highlights_header_uid="tbc",
-#                 block_tree=roam
-#             )
+    def _unique(values: Iterable[str]) -> list[str]:
+        unique_values: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            if value and value not in seen:
+                seen.add(value)
+                unique_values.append(value)
+        return unique_values
 
+    try:
+        export_batch = session.get(RoamExportBatch, batch_id)
+        if export_batch is None:
+            return
 
-#     def _handle_header(
-#         self,
-#         existing_page: RoamPage,
-#         daily_note: str,
-#         roam_batch_action: RoamBatchAction
-#         ):
-#         """"""
-#         dn_blocks = self.roam_client.fetch_block_subtree(daily_note)
-#         header_exists = False
-#         header_uid = None
+        batch_action = RoamBatchAction()
 
-#         # for child_block in dn_blocks['children']:
-#         #     uid_matches = child_block['uid'] == existing_page.highlights_header_uid
-#         #     text_matches = child_block['text'] == existing_page.highlights_header_text
+        highlight_uids = _unique(h.block_uid for h in export_batch.highlights)
+        book_uids = _unique(b.parent_block_uid for b in export_batch.books)
+        header_uids = _unique(p.highlights_header_uid for p in export_batch.pages)
 
-#         #     match (uid_matches, text_matches):
-#         #         case (True, True):
-#         #             print("Existing header confirmed")
-#         #             header_uid = child_block['uid']
-#         #             header_exists = True
-#         #             break
+        for uid in highlight_uids:
+            batch_action.append_delete_block_action(uid)
+        for uid in book_uids:
+            batch_action.append_delete_block_action(uid)
+        for uid in header_uids:
+            batch_action.append_delete_block_action(uid)
 
-#         #         case (True, False):
-#         #             print(f"Header UID found. Text changed to: {child_block['text']}")
-#         #             header_uid = child_block['uid']
-#         #             header_exists = True
-#         #             break
+        if batch_action.batch_action_body.get("actions"):
+            try:
+                batch_action.execute_batch_action()
+                print(f"Deleted Roam blocks for batch {batch_id}")
+            except (requests.exceptions.RequestException, RoamAPIError) as exc:
+                logger.warning(
+                    "Failed to delete Roam blocks for batch %s: %s",
+                    batch_id,
+                    exc,
+                )
 
-#         #         case (False, True):
-#         #             print(f"Header text found but block UID incorrect: {child_block['uid']}")
-#         #             print("Creating a new header")
-#         #             # Don’t set header_exists, will fall through to creation later
+        # Order matters here due to foreign key constraints.
+        roam_objects = (
+            RoamHighlightSnapshot,
+            RoamHighlightExport,
+            RoamBookExport,
+            RoamPageSnapshot,
+            RoamPage,
+        )
 
-#         #         case _:
-#         #             continue
+        for roam_obj in roam_objects:
+            stmt = select(roam_obj).where(roam_obj.export_batch_id == batch_id)
+            results = session.execute(stmt).scalars().all()
+            for obj in results:
+                session.delete(obj)
 
-#         if not header_exists:
-#             header_uid = roam_batch_action.append_a_child_block_action(
-#                 daily_note, header, heading=1
-#             )
-
-#         return header_exists, header_uid
-
-#     def _write_highlights_to_roam_daily_note(
-#         self,
-#         books: dict,
-#         header_uid: str,
-#         roam_batch_action: RoamBatchAction
-#         ):
-#         """"""
-#         for book_id, highlights in books.items():
-#             # This can't be right?
-#             book_title = book_id
-#             book_title_uid = roam_batch_action.append_a_child_block_action(
-#                 header_uid, book_title, heading=3
-#             )
-
-#             for highlight in highlights:
-#                 roam_batch_action.append_a_child_block_action(
-#                     book_title_uid, highlight
-#                 )
-
-#             temp_uids = roam_batch_action.execute_batch_action()
-
-#         return temp_uids, roam_batch_action.batch_action_body
-
-
-#     def _update_roam_export_db(self, temp_uids, batch_action_body):
-
-
-#         print("-------------")
-#         print(temp_uids)
-#         print(batch_action_body)
-#         print("-------------")
+        try:
+            export_batch = session.get(RoamExportBatch, batch_id)
+            session.delete(export_batch)
+            session.commit()
+            print(f"Deleted Roam export batch {batch_id} and associated db records")
+        except OperationalError as exc:
+            session.rollback()
+            logger.error(
+                "Failed to delete Roam export batch %s due to database error: %s",
+                batch_id,
+                exc,
+            )
+            return
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        if owns_session:
+            session.close()
 
 
 if __name__ == "__main__":
-    # rc = RoamClient()
-    # dn_today = rc.date_to_roam_daily_note(date.today())
-    # dn_today = "09-18-2025"
-
-    input = {
-        "09-21-2025": {"book_10": ["a", "b", "c"], "book_11": ["e", "f"]},
-        "09-20-2025": {"book_11": ["g"], "book_12": ["h", "i", "j"]},
-    }
-
-    header = "Fake header"
-    # roam_dbw = RoamDBWriter(header, input)
-    rc = RoamClient()
-    x = rc.fetch_block_subtrees(["09-21-2025", "09-20-2025"])
-    print(x)
-
-    # payload = {
-    #         "action": "batch-actions",
-    #         "actions": [
-    #             {
-    #                 "action": "create-block",
-    #                 "location": {"parent-uid": "JjIBf_M5l", "order": "last"},
-    #                 "block": {"string": "> Ioana", "uid": rc._get_temp_uid()}
-    #             },
-    #             {
-    #                 "action": "create-block",
-    #                 "location": {"parent-uid": "JjIBf_M5l", "order": "last"},
-    #                 "block": {"string": "> Andreea", "uid": rc._get_temp_uid()}
-    #             },
-    #             {
-    #                 "action": "create-block",
-    #                 "location": {"parent-uid": "JjIBf_M5l", "order": "last"},
-    #                 "block": {"string": "> Stuey", "uid": rc._get_temp_uid()}
-    #             },
-    #             {
-    #                 "action": "create-block",
-    #                 "location": {"parent-uid": "JjIBf_M5l", "order": "last"},
-    #                 "block": {"string": "> Bebe", "uid": rc._get_temp_uid()}
-    #             },
-    #         ]
-    #     }
+    pass
+    # delete_roam_export_batch(1)

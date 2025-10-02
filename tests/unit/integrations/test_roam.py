@@ -1,6 +1,6 @@
 """Unit tests for roam.py integration module."""
 
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import Mock, patch
 
 import pytest
@@ -13,6 +13,18 @@ from readwise_local_plus.integrations.roam import (
     RoamUnauthorizedError,
     RoamUnavailableError,
     TempUidGenerator,
+    delete_roam_export_batch,
+)
+from readwise_local_plus.models import (
+    Book,
+    Highlight,
+    ReadwiseBatch,
+    RoamBookExport,
+    RoamExportBatch,
+    RoamHighlightExport,
+    RoamHighlightSnapshot,
+    RoamPage,
+    RoamPageSnapshot,
 )
 
 
@@ -635,6 +647,17 @@ class TestRoamBatchAction:
             assert uid3 == -3
             assert len(batch_action.batch_action_body["actions"]) == 3
 
+    def test_append_delete_block_action(self):
+        """Test append_delete_block_action appends a delete instruction."""
+        with patch("readwise_local_plus.integrations.roam.RoamClient"):
+            batch_action = RoamBatchAction()
+
+            batch_action.append_delete_block_action("block-uid")
+
+            assert batch_action.batch_action_body["actions"] == [
+                {"action": "delete-block", "block": {"uid": "block-uid"}}
+            ]
+
     def test_execute_batch_action(self):
         """Test execute_batch_action method."""
         with patch("readwise_local_plus.integrations.roam.RoamClient"):
@@ -660,3 +683,149 @@ class TestRoamBatchAction:
 
             result = batch_action.execute_batch_action()
             assert result is None
+
+
+class TestDeleteRoamExportBatch:
+    """Tests for deleting Roam export batches."""
+
+    def _seed_roam_batch(self, session) -> RoamExportBatch:
+        now = datetime.now()
+
+        readwise_batch = ReadwiseBatch(
+            start_time=now,
+            end_time=now,
+            database_write_time=now,
+        )
+
+        book = Book(
+            user_book_id=101,
+            title="Test Book",
+            category="articles",
+            batch=readwise_batch,
+        )
+        book.validated = True
+        book.validation_errors = {}
+
+        highlight = Highlight(
+            id=202,
+            text="Test highlight",
+            book=book,
+            batch=readwise_batch,
+        )
+        highlight.validated = True
+        highlight.validation_errors = {}
+
+        export_batch = RoamExportBatch(database_write_time=now)
+
+        page = RoamPage(
+            page_uid="01-02-2023",
+            highlights_header_uid="header-uid",
+            highlights_header_text="[[Readwise highlights]]",
+            export_batch=export_batch,
+        )
+
+        book_export = RoamBookExport(
+            page_uid=page.page_uid,
+            user_book_id=book.user_book_id,
+            parent_block_uid="book-uid",
+            export_date=now,
+            export_batch=export_batch,
+            roam_page=page,
+        )
+
+        highlight_export = RoamHighlightExport(
+            highlight_id=highlight.id,
+            page_uid=page.page_uid,
+            block_uid="highlight-uid",
+            export_date=now,
+            export_batch=export_batch,
+            roam_page=page,
+        )
+
+        highlight_snapshot = RoamHighlightSnapshot(
+            highlight=highlight_export,
+            block_tree={
+                "uid": "highlight-uid",
+                "text": "Test highlight",
+                "children": [],
+            },
+            block_tree_hash="hash-highlight",
+            version=1,
+            export_batch=export_batch,
+        )
+
+        page_snapshot = RoamPageSnapshot(
+            page_uid=page.page_uid,
+            block_tree={"uid": "header-uid", "children": []},
+            block_tree_hash="hash-page",
+            version=1,
+            export_batch=export_batch,
+            roam_page=page,
+        )
+
+        session.add_all(
+            [
+                readwise_batch,
+                book,
+                highlight,
+                export_batch,
+                page,
+                book_export,
+                highlight_export,
+                highlight_snapshot,
+                page_snapshot,
+            ]
+        )
+        session.commit()
+        return export_batch
+
+    def test_delete_roam_export_batch_removes_records_and_calls_roam(self, mem_db):
+        """Deleting an export batch removes DB rows and schedules Roam deletions."""
+
+        session = mem_db.session
+        export_batch = self._seed_roam_batch(session)
+
+        mock_batch_action = Mock()
+        mock_batch_action.batch_action_body = {"actions": []}
+
+        def append_delete(uid: str) -> None:
+            mock_batch_action.batch_action_body["actions"].append(
+                {"action": "delete-block", "block": {"uid": uid}}
+            )
+
+        mock_batch_action.append_delete_block_action.side_effect = append_delete
+        mock_batch_action.execute_batch_action.return_value = {}
+
+        with patch(
+            "readwise_local_plus.integrations.roam.RoamBatchAction",
+            return_value=mock_batch_action,
+        ):
+            delete_roam_export_batch(export_batch.id, session=session)
+
+        expected_uids = ["highlight-uid", "book-uid", "header-uid"]
+        actual_uids = [
+            action["block"]["uid"]
+            for action in mock_batch_action.batch_action_body["actions"]
+        ]
+        assert actual_uids == expected_uids
+        mock_batch_action.execute_batch_action.assert_called_once()
+
+        assert session.query(RoamHighlightSnapshot).count() == 0
+        assert session.query(RoamHighlightExport).count() == 0
+        assert session.query(RoamBookExport).count() == 0
+        assert session.query(RoamPageSnapshot).count() == 0
+        assert session.query(RoamPage).count() == 0
+        assert session.query(RoamExportBatch).count() == 0
+
+    def test_delete_roam_export_batch_handles_missing_batch(self, mem_db):
+        """Missing batches do not trigger API calls or DB changes."""
+
+        session = mem_db.session
+        with patch(
+            "readwise_local_plus.integrations.roam.RoamBatchAction"
+        ) as mock_action:
+            delete_roam_export_batch(9999, session=session)
+
+        mock_action.assert_not_called()
+        # Database remains empty
+        assert session.query(RoamExportBatch).count() == 0
