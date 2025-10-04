@@ -273,11 +273,10 @@ class TestRoamDailyNoteHighlightWriter:
         mock_book.title = "Test Book"
         mock_book.category = "articles"
         mock_book.author = "Author Example"
+        mock_book.source_url = "https://example.com/article"
 
         mock_highlight = SimpleNamespace(
-            id=1,
-            text="Test highlight text",
-            location=None,
+            id=1, text="Test highlight text", location=None, book=mock_book
         )
 
         test_date = date(2023, 1, 15)
@@ -355,7 +354,7 @@ class TestRoamDailyNoteHighlightWriter:
 
         # Verify book creation call
         book_call = mock_batch_action.append_a_child_block_action.call_args_list[1]
-        assert book_call[0] == (-1, "Test Book")
+        assert book_call[0] == (-1, "Test Book #example.com #articles #rw")
         assert book_call[1] == {"heading": 3}
 
         # Verify highlight creation call
@@ -383,11 +382,13 @@ class TestRoamDailyNoteHighlightWriter:
         mock_book.title = "Test Book"
         mock_book.category = "articles"
         mock_book.author = "Author Example"
+        mock_book.source_url = "https://example.com/article"
 
         mock_highlight = SimpleNamespace(
             id=1,
             text="Test highlight",
             location=None,
+            book=mock_book,
         )
 
         test_date = date(2023, 1, 15)
@@ -459,7 +460,10 @@ class TestRoamDailyNoteHighlightWriter:
                 book_call = (
                     mock_batch_action.append_a_child_block_action.call_args_list[0]
                 )
-                assert book_call[0] == ("existing-header-uid", "Test Book")
+                assert book_call[0] == (
+                    "existing-header-uid",
+                    "Test Book #example.com #articles #rw",
+                )
 
     @patch("readwise_local_plus.workflows.roam_daily_note.RoamClient")
     def test_write_highlights_with_existing_book_export(self, mock_roam_client):
@@ -471,10 +475,13 @@ class TestRoamDailyNoteHighlightWriter:
         mock_book = Mock(spec=Book)
         mock_book.user_book_id = 1
         mock_book.title = "Test Book"
+        mock_book.category = "articles"
+        mock_book.source_url = "https://example.com/article"
 
         mock_highlight = Mock(spec=Highlight)
         mock_highlight.id = 1
         mock_highlight.text = "Test highlight"
+        mock_highlight.book = mock_book
 
         test_date = date(2023, 1, 15)
         writer.highlights = {test_date: {mock_book: [mock_highlight]}}

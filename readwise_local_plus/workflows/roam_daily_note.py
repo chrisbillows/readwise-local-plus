@@ -10,6 +10,8 @@ Currently only tweets and articles (hardcoded) are actioned.
 
 import hashlib
 import json
+import logging
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -17,6 +19,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
+from tldextract import extract  # type: ignore[import-not-found]
 
 from readwise_local_plus.config import fetch_user_config
 from readwise_local_plus.db_operations import get_session
@@ -31,6 +34,8 @@ from readwise_local_plus.models import (
     RoamPage,
     RoamPageSnapshot,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -141,6 +146,7 @@ class RoamDailyNoteHighlightWriter:
         """
         Driver method.
         """
+        logger.info(f"Writing batch {self._batch} to Roam daily notes")
         self.fetch_highlights()
         self._write_highlights()
         self._session.close()
@@ -166,6 +172,7 @@ class RoamDailyNoteHighlightWriter:
         )
 
         highlights = self._session.execute(stmt).scalars().all()
+        logger.info(f"Fetched {len(highlights)} highlights for batch {self._batch}")
 
         highlights_by_book: dict[Book, list[Highlight]] = defaultdict(list)
         for hl in highlights:
@@ -210,7 +217,13 @@ class RoamDailyNoteHighlightWriter:
             return f"{title} #tweets #rw"
 
         if book.category == "articles":
-            return book.title
+            title = book.title
+            if isinstance(book.source_url, str):
+                domain = extract(book.source_url).top_domain_under_public_suffix
+                if domain != "":
+                    domain = domain.lower()
+                    title += f" #{domain}"
+            return title + " #articles #rw"
 
         # Fallback for other categories (if any).
         return book.title
@@ -230,14 +243,21 @@ class RoamDailyNoteHighlightWriter:
         HighlightBlockPlan
             Block plan describing how to render the highlight.
         """
-        text = highlight.text or "[ERROR]: Missing highlight text"
-
         book = getattr(highlight, "book", None)
+        if book is None or getattr(book, "category", None) is None:
+            raise ValueError("Invalid highlight object")
 
-        # Tweets: include the source URL (if available) as the parent block, with the
-        # highlight text nested underneath. This keeps the primary export tied to the
-        # text block while preserving the contextual link.
+        text = getattr(highlight, "text", None)
+
+        if text:
+            text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+        else:
+            text = "[ERROR]: Missing highlight text"
+
+        # Tweets include the source URL (if available) as the parent block, with the
+        # highlight text nested underneath.
         if book and getattr(book, "category", None) == "tweets":
+            logger.info(f"Formatting tweet highlight for highlight ID {highlight.id}")
             url = getattr(highlight, "source_url", None)
 
             text_block = HighlightBlockSpec(text=text, is_primary=True)
@@ -248,7 +268,11 @@ class RoamDailyNoteHighlightWriter:
 
             return HighlightBlockPlan(root=text_block)
 
-        # Default behaviour: single block containing the highlight text.
+        logger.info(
+            f"Formatting non tweet ({book.category}) highlight for "
+            f"highlight ID {highlight.id}"
+        )
+
         return HighlightBlockPlan(root=HighlightBlockSpec(text=text, is_primary=True))
 
     @staticmethod
@@ -282,6 +306,9 @@ class RoamDailyNoteHighlightWriter:
         self._session.add(export_batch)
 
         for daily_note, books_and_highlights in self.highlights.items():
+            logger.info(
+                f"Processing {len(books_and_highlights)} books for {daily_note}"
+            )
             self._process_daily_note(daily_note, books_and_highlights, export_batch)
 
         self._session.commit()
@@ -377,6 +404,9 @@ class RoamDailyNoteHighlightWriter:
         pending = StagedExports(books=[], highlights=[], snapshots=[])
 
         for book, highlights in books_and_highlights.items():
+            logger.info(
+                f"Processing {len(highlights)} highlights for book {book.title}"
+            )
             self._process_book(
                 daily_note_uid,
                 header_uid_candidate,
@@ -475,20 +505,6 @@ class RoamDailyNoteHighlightWriter:
         )
         if existing_export:
             return
-
-        # We can do type filtering here can't we? So we add custom logic for a highlight
-        # when we want multiple "lines", e.g. the tweet link on a line, and the tweet
-        # text nested beneath it.
-        # ADD A `highlight_child` bool to this method.
-
-        # if highlighted_child:
-        #     pass
-
-        # or maybe it's
-        # formatted_highlight, highlight_child = self.create_formatted_highlight_by_category(highlight)
-        # That could be a bool and later we do if highlight_child, then we call the logic - it might be better
-        # to have pass the text into this method, and make this a generalised method that just appends a block
-        # to a book.  Then the logic would just be at the process_book level?
 
         plan = self.create_formatted_highlight_by_category(highlight)
         render_result = self._render_highlight_block_tree(
@@ -861,7 +877,11 @@ class RoamDailyNoteHighlightWriter:
 
 
 if __name__ == "__main__":
-    r = RoamDailyNoteHighlightWriter(batch_id=3)
+    from readwise_local_plus.configure_logging import setup_logging
+
+    setup_logging()
+    r = RoamDailyNoteHighlightWriter(batch_id=7)
     # Batch 3 has two daily notes: 15th July and 14th August
     # Batch 8 has one: 7th September
+    # Batch 7 had a good mix from dates
     r.write_batch_to_daily_notes()
