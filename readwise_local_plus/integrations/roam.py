@@ -549,5 +549,4 @@ def delete_roam_export_batch(
 
 
 if __name__ == "__main__":
-    pass
-    # delete_roam_export_batch(1)
+    delete_roam_export_batch(1)
