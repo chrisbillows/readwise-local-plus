@@ -19,7 +19,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
-from tldextract import extract  # type: ignore[import-not-found]
+from tldextract import extract
 
 from readwise_local_plus.config import fetch_user_config
 from readwise_local_plus.db_operations import get_session
@@ -31,9 +31,11 @@ from readwise_local_plus.models import (
     RoamExportBatch,
     RoamHighlightExport,
     RoamHighlightSnapshot,
+    RoamKnownPage,
     RoamPage,
     RoamPageSnapshot,
 )
+from readwise_local_plus.workflows.roam_daily_note_pages import create_daily_note_page
 
 logger = logging.getLogger(__name__)
 
@@ -219,10 +221,16 @@ class RoamDailyNoteHighlightWriter:
         if book.category == "articles":
             title = book.title
             if isinstance(book.source_url, str):
-                domain = extract(book.source_url).top_domain_under_public_suffix
-                if domain != "":
-                    domain = domain.lower()
-                    title += f" #{domain}"
+                try:
+                    domain = extract(book.source_url).top_domain_under_public_suffix
+                    if domain:
+                        title += f" #{domain.lower()}"
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug(
+                        "Failed to extract domain from %s: %s",
+                        book.source_url,
+                        exc,
+                    )
             return title + " #articles #rw"
 
         # Fallback for other categories (if any).
@@ -332,8 +340,24 @@ class RoamDailyNoteHighlightWriter:
 
         """
         daily_note_uid = self.roam_client.date_to_roam_daily_note(daily_note)
-
         existing_page = self._session.get(RoamPage, daily_note_uid)
+        if (
+            existing_page is None
+            and self._session.get(RoamKnownPage, daily_note_uid) is None
+        ):
+            try:
+                create_daily_note_page(
+                    daily_note,
+                    session=self._session,
+                    roam_client=self.roam_client,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning(
+                    "Failed to ensure daily note %s exists: %s",
+                    daily_note_uid,
+                    exc,
+                )
+
         roam_batch_action = RoamBatchAction()
 
         if existing_page:
@@ -880,7 +904,7 @@ if __name__ == "__main__":
     from readwise_local_plus.configure_logging import setup_logging
 
     setup_logging()
-    r = RoamDailyNoteHighlightWriter(batch_id=7)
+    r = RoamDailyNoteHighlightWriter(batch_id=8)
     # Batch 3 has two daily notes: 15th July and 14th August
     # Batch 8 has one: 7th September
     # Batch 7 had a good mix from dates

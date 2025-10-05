@@ -27,6 +27,7 @@ repos:
           - rich
           - python-dotenv
           - pydantic
+          - tldextract
         # Run on package files only
         files: ^readwise_local_plus/
 -   repo: local

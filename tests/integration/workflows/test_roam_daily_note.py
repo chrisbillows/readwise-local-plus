@@ -182,10 +182,14 @@ class TestRoamDailyNoteIntegration:
                 "readwise_local_plus.workflows.roam_daily_note.RoamClient"
             ) as mock_roam_client_class,
             patch("requests.post") as mock_post,
+            patch(
+                "readwise_local_plus.workflows.roam_daily_note.create_daily_note_page"
+            ) as mock_create_daily_note,
         ):
             # Setup mocks
             mock_get_session.return_value = session
             mock_fetch_config.return_value = mock_roam_config
+            mock_create_daily_note.side_effect = lambda *args, **kwargs: "uid"
 
             # Mock Roam API responses
             mock_response = Mock()
@@ -278,9 +282,13 @@ class TestRoamDailyNoteIntegration:
                 "readwise_local_plus.workflows.roam_daily_note.RoamClient"
             ) as mock_roam_client_class,
             patch("requests.post") as mock_post,
+            patch(
+                "readwise_local_plus.workflows.roam_daily_note.create_daily_note_page"
+            ) as mock_create_daily_note,
         ):
             mock_get_session.return_value = session
             mock_fetch_config.return_value = mock_roam_config
+            mock_create_daily_note.side_effect = lambda *args, **kwargs: "uid"
 
             mock_response = Mock()
             mock_response.ok = True
@@ -355,9 +363,13 @@ class TestRoamDailyNoteIntegration:
                 "readwise_local_plus.workflows.roam_daily_note.RoamClient"
             ) as mock_roam_client_class,
             patch("requests.post") as mock_post,
+            patch(
+                "readwise_local_plus.workflows.roam_daily_note.create_daily_note_page"
+            ) as mock_create_daily_note,
         ):
             mock_get_session.return_value = session
             mock_fetch_config.return_value = mock_roam_config
+            mock_create_daily_note.side_effect = lambda *args, **kwargs: "uid"
 
             mock_response = Mock()
             mock_response.ok = True

@@ -792,3 +792,17 @@ class RoamExportBatch(Base):
         if self.database_write_time:
             parts.append(f"write={self.database_write_time.isoformat()}")
         return ", ".join(parts) + ")"
+
+
+class RoamKnownPage(Base):
+    """Track daily note pages that are known to exist in Roam."""
+
+    __tablename__ = "roam_known_pages"
+
+    page_uid: Mapped[str] = mapped_column(primary_key=True)
+    last_verified_at: Mapped[datetime] = mapped_column(
+        default=datetime.now, nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"RoamKnownPage(page_uid={self.page_uid!r})"
