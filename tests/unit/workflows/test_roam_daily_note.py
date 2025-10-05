@@ -331,7 +331,11 @@ class TestRoamDailyNoteHighlightWriter:
                 "readwise_local_plus.workflows.roam_daily_note.RoamHighlightSnapshot"
             ),
             patch("readwise_local_plus.workflows.roam_daily_note.RoamPageSnapshot"),
+            patch(
+                "readwise_local_plus.workflows.roam_daily_note.create_daily_note_page"
+            ) as mock_create_daily_note,
         ):
+            mock_create_daily_note.return_value = "01-15-2023"
             # Call the method
             writer._write_highlights()
 
@@ -425,6 +429,9 @@ class TestRoamDailyNoteHighlightWriter:
             patch(
                 "readwise_local_plus.workflows.roam_daily_note.datetime"
             ) as mock_datetime,
+            patch(
+                "readwise_local_plus.workflows.roam_daily_note.create_daily_note_page"
+            ) as mock_create_daily_note,
         ):
             mock_datetime.now.return_value = datetime(2023, 1, 15, 10, 0, 0)
             mock_batch_action = Mock()
@@ -435,6 +442,7 @@ class TestRoamDailyNoteHighlightWriter:
             }
             mock_batch_action.batch_action_body = {"actions": ["mock_action"]}
             mock_batch_action_class.return_value = mock_batch_action
+            mock_create_daily_note.return_value = "01-15-2023"
 
             mock_client = Mock()
             mock_client.date_to_roam_daily_note.return_value = "01-15-2023"
@@ -482,6 +490,8 @@ class TestRoamDailyNoteHighlightWriter:
         mock_highlight.id = 1
         mock_highlight.text = "Test highlight"
         mock_highlight.book = mock_book
+        mock_highlight.book = mock_book
+        mock_highlight.book = mock_book
 
         test_date = date(2023, 1, 15)
         writer.highlights = {test_date: {mock_book: [mock_highlight]}}
@@ -525,6 +535,9 @@ class TestRoamDailyNoteHighlightWriter:
             patch(
                 "readwise_local_plus.workflows.roam_daily_note.datetime"
             ) as mock_datetime,
+            patch(
+                "readwise_local_plus.workflows.roam_daily_note.create_daily_note_page"
+            ) as mock_create_daily_note,
         ):
             mock_datetime.now.return_value = datetime(2023, 1, 15, 10, 0, 0)
             mock_batch_action = Mock()
@@ -538,6 +551,7 @@ class TestRoamDailyNoteHighlightWriter:
             }
             mock_batch_action.batch_action_body = {"actions": ["mock_action"]}
             mock_batch_action_class.return_value = mock_batch_action
+            mock_create_daily_note.return_value = "01-15-2023"
 
             mock_client = Mock()
             mock_client.date_to_roam_daily_note.return_value = "01-15-2023"
@@ -606,6 +620,9 @@ class TestRoamDailyNoteHighlightWriter:
             patch(
                 "readwise_local_plus.workflows.roam_daily_note.datetime"
             ) as mock_datetime,
+            patch(
+                "readwise_local_plus.workflows.roam_daily_note.create_daily_note_page"
+            ) as mock_create_daily_note,
         ):
             mock_datetime.now.return_value = datetime(2023, 1, 15, 10, 0, 0)
             mock_batch_action = Mock()
@@ -619,6 +636,7 @@ class TestRoamDailyNoteHighlightWriter:
             }
             mock_batch_action.batch_action_body = {"actions": ["mock_action"]}
             mock_batch_action_class.return_value = mock_batch_action
+            mock_create_daily_note.return_value = "01-15-2023"
 
             mock_client = Mock()
             mock_client.date_to_roam_daily_note.return_value = "01-15-2023"
@@ -679,6 +697,9 @@ class TestRoamDailyNoteHighlightWriter:
             patch(
                 "readwise_local_plus.workflows.roam_daily_note.datetime"
             ) as mock_datetime,
+            patch(
+                "readwise_local_plus.workflows.roam_daily_note.create_daily_note_page"
+            ) as mock_create_daily_note,
         ):
             mock_datetime.now.return_value = datetime(2023, 1, 15, 10, 0, 0)
             mock_batch_action = Mock()
@@ -690,6 +711,7 @@ class TestRoamDailyNoteHighlightWriter:
             }
             mock_batch_action.batch_action_body = {"actions": ["mock_action"]}
             mock_batch_action_class.return_value = mock_batch_action
+            mock_create_daily_note.return_value = "01-15-2023"
 
             mock_client = Mock()
             mock_client.date_to_roam_daily_note.return_value = "01-15-2023"
