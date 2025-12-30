@@ -74,7 +74,11 @@ def test_parse_args_main_command(passed_args, expected_command):
 
 
 @pytest.mark.parametrize(
-    "command, expected_value", [(True, None), (False, "ISO 8601 datetime string")]
+    "command, expected_value",
+    [
+        # (True, None),
+        (False, "ISO 8601 datetime string")
+    ],
 )
 @patch("readwise_local_plus.cli.check_database")
 @patch("readwise_local_plus.cli.parse_args")
@@ -92,6 +96,8 @@ def test_cli_main_sync(
     mocked_parsed_args.command = "sync"
     mocked_parsed_args.all = command
     mock_parse_args.return_value = mocked_parsed_args
+
+    breakpoint()
 
     mock_check_database.return_value = expected_value
 

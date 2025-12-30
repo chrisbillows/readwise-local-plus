@@ -96,6 +96,43 @@ class RoamClient:
         """
         return self.uid_generator.next()
 
+    def _ordinal(self, num: int) -> str:
+        """
+        Convert a number to its ordinal representation.
+
+        Parameters
+        ----------
+        num : int
+            The number to convert. E.g. 1, 2, 3, etc.
+
+        Returns
+        -------
+        str
+            The ordinal representation of the number. E.g. "1st", "2nd", "3rd", etc.
+        """
+        if 10 <= num % 100 <= 20:
+            suffix = "th"
+        else:
+            suffix = {1: "st", 2: "nd", 3: "rd"}.get(num % 10, "th")
+        return f"{num}{suffix}"
+
+    def _format_daily_note_title_long_format(self, target_date: date) -> str:
+        """
+        Format a date into Roam's daily note title format.
+
+        Parameters
+        ----------
+        target_date : date
+            The date to format. E.g. datetime.date(2023, 9, 21).
+
+        Returns
+        -------
+        str
+            The formatted date string. E.g. "September 21st, 2023".
+
+        """
+        return f"{target_date:%B} {self._ordinal(target_date.day)}, {target_date:%Y}"
+
     def _headers(self) -> dict[str, str]:
         return {
             "accept": "application/json",
@@ -106,7 +143,10 @@ class RoamClient:
 
     def _handle_response(self, response: requests.Response) -> Any:
         if response.ok:
-            return response.json()
+            try:
+                return response.json()
+            except requests.exceptions.JSONDecodeError:
+                return response.status_code
         elif response.status_code == 401:
             raise RoamUnauthorizedError("Invalid or unauthorized token.")
         elif response.status_code == 429:
@@ -368,6 +408,43 @@ class RoamClient:
         temp_id_for_block = response_json["tempids-to-uids"][str(temp_uid)]
         return str(temp_id_for_block)
 
+    def create_page(self, title: str, exists_ok: bool = True) -> bool:
+        """
+        Create a new page in Roam.
+
+        Parameters
+        ----------
+        title : str
+            The title of the page to be created.
+
+        Returns
+        -------
+        bool
+            True if the page was created, False if it already existed and `exists_ok` is
+            False.
+        """
+        payload = {
+            "action": "create-page",
+            "page": {
+                "title": title,
+            },
+        }
+        try:
+            self._write(payload)
+        except RoamAPIError as err:
+            if (
+                "Page with title" in str(err)
+                and "already exists" in str(err)
+                and exists_ok
+            ):
+                logger.info("Page with title '%s' already exists.", title)
+                return True
+            else:
+                logger.error("Failed to create page '%s': %s", title, err)
+                return False
+        logger.info("Created page with title '%s'.", title)
+        return True
+
 
 class RoamBatchAction:
     def __init__(self) -> None:
@@ -550,3 +627,10 @@ def delete_roam_export_batch(
 
 if __name__ == "__main__":
     delete_roam_export_batch(1)
+    # target_date_1 = "August 7th, 2024"
+    # target_date_2 = "August 6th, 2024"
+    # rc = RoamClient()
+    # x = rc.create_page(target_date_1)
+    # print("date one created: ", x)
+    # y = rc.create_page(target_date_2)
+    # print("date two created: ", y)

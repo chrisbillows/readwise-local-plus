@@ -17,6 +17,7 @@ from readwise_local_plus.utils import (
     list_invalid_db_objects,
     readwise_api_fetch_since_custom_date,
 )
+from readwise_local_plus.workflows.roam_daily_note import RoamDailyNoteHighlightWriter
 
 logger = logging.getLogger(__name__)
 
@@ -161,9 +162,8 @@ def main(user_config: Optional[UserConfig] = None) -> None:
             )
             print("Batch written was: ", batch_written)
             if batch_written:
-                print("This would trigger writing to Roam!")
-                # rdw = RoamDailyNoteWriter()
-                # rdw.write_batch_to_daily_notes(batch_written)
+                rdw = RoamDailyNoteHighlightWriter(batch_written)
+                rdw.write_batch_to_daily_notes()
 
     elif args.command == "list-invalids":
         list_invalid_db_objects(user_config)
