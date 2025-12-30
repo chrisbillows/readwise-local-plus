@@ -35,7 +35,6 @@ from readwise_local_plus.models import (
     RoamPage,
     RoamPageSnapshot,
 )
-from readwise_local_plus.workflows.roam_daily_note_pages import create_daily_note_page
 
 logger = logging.getLogger(__name__)
 
@@ -212,14 +211,18 @@ class RoamDailyNoteHighlightWriter:
         # Tweets and tweet threads.
         if book.category == "tweets":
             if not book.title.lower().startswith("tweets from"):
-                author = book.author.split(" ")[0][1:] if book.author else "unknown"
+                if book.author.startswith("@"):
+                    author = book.author.split(" ")[0][1:] if book.author else "unknown"
+                else:
+                    author = book.author.title()
                 title = f"Tweet Thread From {author}"
             else:
                 title = book.title
-            return f"{title} #tweets #rw"
+            return f"{title} #[[tweets]] #[[rw]] [↗️]({book.source_url or 'n/a'})"
 
         if book.category == "articles":
-            title = book.title
+            author = book.author.title() if book.author else "unknown"
+            title = book.title + f" #[[{author}]]"
             if isinstance(book.source_url, str):
                 try:
                     domain = extract(book.source_url).top_domain_under_public_suffix
@@ -231,7 +234,7 @@ class RoamDailyNoteHighlightWriter:
                         book.source_url,
                         exc,
                     )
-            return title + " #articles #rw"
+            return title + f" #[[articles]] #[[rw]] [↗️]({book.source_url or 'n/a'})"
 
         # Fallback for other categories (if any).
         return book.title
@@ -259,27 +262,22 @@ class RoamDailyNoteHighlightWriter:
 
         if text:
             text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+            text = text.replace("\n", " ")
+            text = f"{text}"
         else:
             text = "[ERROR]: Missing highlight text"
 
-        # Tweets include the source URL (if available) as the parent block, with the
-        # highlight text nested underneath.
         if book and getattr(book, "category", None) == "tweets":
-            logger.info(f"Formatting tweet highlight for highlight ID {highlight.id}")
-            url = getattr(highlight, "source_url", None)
+            text += f"[↗️]({highlight.url or 'n/a'})"
+            url = getattr(highlight, "url", None)
 
-            text_block = HighlightBlockSpec(text=text, is_primary=True)
+            # text_block = HighlightBlockSpec(text=text, is_primary=True)
 
-            if url:
-                root = HighlightBlockSpec(text=url, children=[text_block])
-                return HighlightBlockPlan(root=root)
+            # if url:
+            #     root = HighlightBlockSpec(text=url, children=[text_block])
+            #     return HighlightBlockPlan(root=root)
 
-            return HighlightBlockPlan(root=text_block)
-
-        logger.info(
-            f"Formatting non tweet ({book.category}) highlight for "
-            f"highlight ID {highlight.id}"
-        )
+            # return HighlightBlockPlan(root=text_block)
 
         return HighlightBlockPlan(root=HighlightBlockSpec(text=text, is_primary=True))
 
@@ -345,18 +343,18 @@ class RoamDailyNoteHighlightWriter:
             existing_page is None
             and self._session.get(RoamKnownPage, daily_note_uid) is None
         ):
+            daily_note_long_format = (
+                self.roam_client._format_daily_note_title_long_format(daily_note)
+            )
             try:
-                create_daily_note_page(
-                    daily_note,
-                    session=self._session,
-                    roam_client=self.roam_client,
-                )
+                self.roam_client.create_page(daily_note_long_format, exists_ok=True)
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.warning(
                     "Failed to ensure daily note %s exists: %s",
                     daily_note_uid,
                     exc,
                 )
+            self._record_page_seen(daily_note_uid)
 
         roam_batch_action = RoamBatchAction()
 
@@ -644,6 +642,20 @@ class RoamDailyNoteHighlightWriter:
             return resolved
         return tempid_map.get(uid, uid)
 
+    def _record_page_seen(self, page_uid: str) -> None:
+        """
+        Record that a page has been seen in the RoamKnownPage table.
+
+        Parameters
+        ----------
+        page_uid : str
+            UID of the page that has been seen.
+
+        """
+        now = datetime.now()
+        self._session.add(RoamKnownPage(page_uid=page_uid, last_verified_at=now))
+        self._session.flush()
+
     def _upsert_page(
         self,
         existing_page: RoamPage | None,
@@ -904,7 +916,7 @@ if __name__ == "__main__":
     from readwise_local_plus.configure_logging import setup_logging
 
     setup_logging()
-    r = RoamDailyNoteHighlightWriter(batch_id=8)
+    r = RoamDailyNoteHighlightWriter(batch_id=31)
     # Batch 3 has two daily notes: 15th July and 14th August
     # Batch 8 has one: 7th September
     # Batch 7 had a good mix from dates
