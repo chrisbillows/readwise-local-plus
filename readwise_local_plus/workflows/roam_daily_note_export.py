@@ -22,12 +22,13 @@ from readwise_local_plus.models import (
     RoamPageSnapshot,
 )
 
-from readwise_local_plus.workflows.graph import Node
+from readwise_local_plus.workflows.tree import Node
 
 logger = logging.getLogger(__name__)
 
 @dataclass
-class HighlightExhaustive:
+class DNHighlight:
+    """Fields required to export a highlight to a Roam Daily Note."""
     user_book_id: int
     id: int
     text: str
@@ -42,60 +43,36 @@ class HighlightExhaustive:
     book_author: str | None
     book_source_url: str | None
 
-
-@dataclass(frozen=True)
-class BookData:
-    user_book_id: int
-    title: str | None
-    category: str | None
-    author: str | None
-    source_url: str | None
-
-
-@dataclass(frozen=True)
-class HighlightData:
-    user_book_id: int
-    id: int
-    text: str
-    note: str | None
-    location: int | None
-    created_at: datetime | None
-    updated_at: datetime | None
-    url: str | None
-    readwise_url: str | None
-
     def __repr__(self):
-        return()
-        
+        text = self.text[:80]
+        if len(text) == 80:
+            text += "..."
+        return f'DNHiglight(Text="{text}"'
 
-@dataclass
-class Payload:
-    daily_note_dates: date
-    books: list[BookData]
-    highlights: list[HighlightData]
 
-    def __repr__(self) -> str:
-        return (
-            f"daily-notes:{",".join([d.isoformat() for d in self.daily_note_dates])} "
-            f"books:{len(self.books)} hls:{len(self.highlights)}"
-        )
-
-class PayloadBuilder:
+class DNHighlightsPayload:
     """
     Build plain-Python daily note payloads from ORM highlights.
     """
-
     def __init__(self, batch_id: int) -> None:
         self.batch_id = batch_id
         self._session: Session = get_session(fetch_user_config().db_path)
+        self.raw_highlights = []
+        self.dn_highlights = []
+        self.grouped_highlights = defaultdict(lambda: defaultdict(list))
 
-    def build(self) -> list[Payload]:
-        raw_highlights = self._fetch_raw_highlights()
-        payload = self._process_highlights_exhaustive(raw_highlights)
+    def build(self):
+        self._fetch_raw_highlights()
+        self._convert_highlights()
+        
+        # for hl in self.dn_highlights:
+        #     print(hl)
+        
+        self._group_highlights()
         self._session.close()
-        return payload
+        return self.grouped_highlights
 
-    def _fetch_raw_highlights(self) -> list[Highlight]:
+    def _fetch_raw_highlights(self):
         stmt = (
             select(Highlight)
             .join(Highlight.book)
@@ -115,23 +92,13 @@ class PayloadBuilder:
             .order_by(Highlight.book_id, Highlight.id)
         )
 
-        raw_highlights = self._session.execute(stmt).scalars().all()
-        logger.info(
-            "Fetched %s highlights for batch %s",
-            len(raw_highlights),
-            self.batch_id,
-        )
-        return raw_highlights
+        self.raw_highlights = self._session.execute(stmt).scalars().all()
+        logger.info(f"{len(self.raw_highlights)} highlights in batch {self.batch_id}")
 
-
-    def _process_highlights_exhaustive(self, raw_highlights: list[Highlight]):
-        hles = []
-        for highlight in raw_highlights:
-            book = highlight.book
-            if book is None:
-                continue
-            hle = HighlightExhaustive(
-                user_book_id=book.user_book_id,
+    def _convert_highlights(self):
+        for highlight in self.raw_highlights:
+            dn_highlight = DNHighlight(
+                user_book_id=highlight.book.user_book_id,
                 id=highlight.id,
                 text=highlight.text,
                 note=highlight.note,
@@ -145,210 +112,105 @@ class PayloadBuilder:
                 book_category=highlight.book.category,
                 book_source_url=highlight.book.source_url,
             )
-            hles.append(hle)
-        return hles
+            self.dn_highlights.append(dn_highlight)      
 
-    def _process_highlights(self, raw_highlights: list[Highlight]):
-        book_ids_seen = set()
-        
-        dates = set()
-        books = []
-        highlights = []
+    def _group_highlights(self):
+        for dn_highlight in self.dn_highlights:
+            daily_note_date = dn_highlight.created_at.date()
+            book = dn_highlight.user_book_id
+            self.grouped_highlights[daily_note_date][book].append(dn_highlight)
 
-        for highlight in raw_highlights:
-            book = highlight.book
-            if book is None:
-                continue
 
-            if book.user_book_id not in book_ids_seen:
-                book_data = BookData(
-                    user_book_id=book.user_book_id,
-                    title=book.title,
-                    category=book.category,
-                    author=book.author,
-                    source_url=book.source_url,
-                )
-                books.append(book_data)
-                book_ids_seen.add(book.user_book_id)
+def ensure_payload_daily_notes_exist(dn_highlight_payload):
+    """
+    Ensure the daily note for the payload's target date exists in Roam, creating it if necessary.
 
-            highlight_data = HighlightData(
-                user_book_id=book.user_book_id,
-                id=highlight.id,
-                text=highlight.text,
-                note=highlight.note,
-                location=highlight.location,
-                created_at=highlight.created_at,
-                updated_at=highlight.updated_at,
-                url=highlight.url,
-                readwise_url=highlight.readwise_url,
-            )
-            highlights.append(highlight_data)
-
-            if not highlight.created_at:
-                logger.warning(
-                    "Highlight %s has no created_at timestamp; using today's date for grouping",
-                    highlight.id,
-                )
-                continue
-            dates.add(highlight.created_at.date())
-
-        return Payload(
-            daily_note_dates=list(dates), books=list(books), highlights=highlights
-        )
-
-    # def _group_highlights_by_book(
-    #     self, highlights: list[tuple[BookData, HighlightData]]
-    # ) -> dict[BookData, list[HighlightData]]:
-    #     highlights_by_book: dict[BookData, list[HighlightData]] = defaultdict(list)
-
-    #     for book, highlight in highlights:
-    #         highlights_by_book[book].append(highlight)
-
-    #     for book_highlights in highlights_by_book.values():
-    #         if book_highlights[0].location is not None:
-    #             book_highlights.sort(key=lambda h: h.location or 0)
-    #         else:
-    #             book_highlights.sort(key=lambda h: h.created_at or datetime.min)
-
-    #     return dict(highlights_by_book)
-
-    # def _group_books_by_date(
-    #     self, highlights_by_book: dict[BookData, list[HighlightData]]
-    # ) -> list[DailyNotePayload]:
-    #     grouped_by_date: dict[date, list[BookHighlights]] = defaultdict(list)
-
-    #     for book, highlights in highlights_by_book.items():
-    #         target_date = (
-    #             highlights[-1].created_at.date()
-    #             if highlights[-1].created_at
-    #             else date.today()
-    #         )
-    #         grouped_by_date[target_date].append(
-    #             BookHighlights(book=book, highlights=highlights)
-    #         )
-
-    #     return [
-    #         DailyNotePayload(target_date=target_date, books=books)
-    #         for target_date, books in sorted(grouped_by_date.items())
-    #     ]
+    Daily notes are stored in the RoamKnownPage table.
+    """
+    roam_client = RoamClient()
+    session = get_session(fetch_user_config().db_path) 
     
-class DNPageManager:
-
-    def __init__(self, payload: Payload) -> None:
-        self.payload = payload
-        self.roam_client = RoamClient()
-        self._session: Session = get_session(fetch_user_config().db_path)
-
-    def ensure_daily_note_exists(self) -> None:
-        """
-        Ensure the daily note for the payload's target date exists in Roam, creating it if necessary.
-
-        Daily notes are stored in the RoamKnownPage table.
-        """
-        # daily_note = self.payload.target_date
-        daily_note = date(2025, 3, 28)   
-        daily_note_uid = self.roam_client.date_to_roam_daily_note(daily_note)
-        existing_page = self._session.get(RoamKnownPage, daily_note_uid)
+    for daily_note in dn_highlight_payload.keys():
+        # WHAT ARE WE ITERATING OVER HERE?
+        daily_note_uid = roam_client.date_to_roam_daily_note(daily_note)
+        existing_page = session.get(RoamKnownPage, daily_note_uid)
         if (
             existing_page is None
-            and self._session.get(RoamKnownPage, daily_note_uid) is None
+            and session.get(RoamKnownPage, daily_note_uid) is None
         ):
             print("logic trigggered")
             daily_note_long_format = (
-                self.roam_client._format_daily_note_title_long_format(daily_note)
+                roam_client._format_daily_note_title_long_format(daily_note)
             )
             try:
-                self.roam_client.create_page(daily_note_long_format, exists_ok=True)
+                roam_client.create_page(daily_note_long_format, exists_ok=True)
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.warning(
                     "Failed to ensure daily note %s exists: %s",
                     daily_note_uid,
                     exc,
                 )
-            self._session.add(
+            session.add(
                 RoamKnownPage(page_uid=daily_note_uid, last_verified_at=datetime.now())
             )
-            self._session.commit()
+            session.commit()
         else:
             print("logic not triggered")
-        self._session.close()
-
-   
+        session.close()
 
 
-# class ExportPayloadsCreator:
+# class FormatedBookTrees:
+
+
+def main(batch_id: int):
+    dnhp = DNHighlightsPayload(batch_id)
+    grouped_highlights = dnhp.build()
+    # ensure_payload_daily_notes_exist(grouped_highlights)
+    
+    # for daily_note_date, book_dict in grouped_highlights.items():
+                
+    #     print(daily_note_date.isoformat())
+        
+    #     for book_id, highlights in book_dict.items():
+    #         print(f"{book_id} - {len(highlights)} hls")
+        
+    # create trees
+    daily_note_nodes = []
+    for daily_note_date, book_dict in grouped_highlights.items():
+        
+        daily_note_date: date
+        book_dict: dict[int, DNHighlight]
+        
+        daily_note_node = Node("daily_note", daily_note_date)
+        
+        for book_id, highlights in book_dict.items():
+            book_node = Node("book_header", book_id)
+            daily_note_node.add_child(book_node)
+
+            book_summary_node = Node("book_summary", "#[[rw]] #[[]]")
+            book_node.add_child(book_summary_node)
+
+            for highlight in highlights:
+                highlight: DNHighlight
+                highlight_node = Node("highlight_text", highlight.text)
+                book_summary_node.add_child(highlight_node)
+                if highlight.note:
+                    note_node = Node("highlight_note", highlight.note)
+                    highlight_node.add_child(note_node)
+        
+        daily_note_nodes.append(daily_note_node)
+
+    print(daily_note_nodes)
+
+if __name__ == "__main__":
+    batch_id = 60  
+    main(batch_id)    
     
 
 
-#     def __init__(self, payload: Payload) -> None:
-#         self.payload = payload
-
-#     def created_book_payloads_by_date(self) -> dict[date, list[BookData]]:
 
 
 
-
-
-#         payloads_by_date: dict[date, list[BookData]] = defaultdict(list)
-#         for book in self.payload.books:
-#             book_highlights = [
-#                 h for h in self.payload.highlights if h.user_book_id == book.user_book_id
-#             ]
-#             if not book_highlights:
-#                 continue
-#             target_date = (
-#                 book_highlights[-1].created_at.date()
-#                 if book_highlights[-1].created_at
-#                 else date.today()
-#             )
-#             payloads_by_date[target_date].append(book)
-#         return dict(payloads_by_date)
-
-class ExportSingleDailyNote:
-    """
-    Daily notes are already proven to exist seperately
-
-    Batch by daily note.
-    """
-
-
-    def __init__(self, payload: Payload, daily_note_date: date) -> None:
-        self.daily_note_date = daily_note_date
-        self.roam_client = RoamClient()
-        self.roam_batch_action = RoamBatchAction()
-        self.header_uid = self.retrieve_or_create_rw_header()
- 
-    def retrieve_or_create_rw_header(self):
-        pass
-
-    # def add_book_header(self):
-    #     book_block_uid_candidate = self.roam_batch_action.append_a_child_block_action(
-    #             self.header_uid,
-    #             book_header,
-    #             heading=3,
-    #         )
-
-    # def add_highlights(self):
-    #     pass
-
-    def add_book_graph_to_batch_action():
-        pass
-
-
-
-def write_confirmation_to_db():
-    pass
-
-
-def format_book_header():
-    pass
-
-if __name__ == "__main__":
-    batch_id = 65
-    pb = PayloadBuilder(batch_id)
-    pl: Payload = pb.build()
-
-    breakpoint()
 
     # date_nodes = set()
     # book_nodes = set()
@@ -363,15 +225,15 @@ if __name__ == "__main__":
     # for highlight in pl.highlights:
     #     print(type(highlight))
 
-    rba = RoamBatchAction()
-    rb = rba.create_batch_action_body()
+    # rba = RoamBatchAction()
+    # rb = rba.create_batch_action_body()
 
-    book = Node("title", "THE TWITS")
-    summary = Node("summary", "#[[Roald Dahl]] #[rw]] #[[books]]")
-    q1 = Node("highlight", "Quote1")
-    q2 = Node("highlight", "Quote2")
-    book.add_child(summary)
-    summary.add_child(q1)
-    summary.add_child(q2)
+    # book = Node("title", "THE TWITS")
+    # summary = Node("summary", "#[[Roald Dahl]] #[rw]] #[[books]]")
+    # q1 = Node("highlight", "Quote1")
+    # q2 = Node("highlight", "Quote2")
+    # book.add_child(summary)
+    # summary.add_child(q1)
+    # summary.add_child(q2)
 
-    breakpoint()
+    # breakpoint()

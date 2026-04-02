@@ -22,7 +22,7 @@ from readwise_local_plus.models import (
     RoamPageSnapshot,
 )
 
-from readwise_local_plus.workflows.graph import Node
+from readwise_local_plus.workflows.tree import Node
 
 logger = logging.getLogger(__name__)
 
