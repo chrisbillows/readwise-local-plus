@@ -162,6 +162,7 @@ def main(user_config: Optional[UserConfig] = None) -> None:
             )
             print("Batch written was: ", batch_written)
             if batch_written:
+                # highlights_to__Write = create_highlight_payload(batch_written.id)
                 rdw = RoamDailyNoteHighlightWriter(batch_written)
                 rdw.write_batch_to_daily_notes()
 
