@@ -1,3 +1,15 @@
+# 30th March
+
+have a basic graph represenation
+next q is how do we most easily iterate over that
+creating the batch action body
+presumably it's some kind of recursion
+
+so... i think this is so much better because IT NEVER NEEDS TO BE GROUPED?
+
+
+
+
 # 28th March
 
 Working in `roam_daily_note_3.py`
@@ -10,14 +22,22 @@ Grouping still an issue
 - then check existence of daily notes
 - but so much wasted looping
 
-Chat GPT suggested a composite key
+Chat GPT suggested a composite key but not sure that works
 
 Steps
 - recieve the batch_id
 - query DB, get back list of highlights `<class 'readwise_local_plus.models.Highlight'>`
 - convert that to a dataclass (remove session dependency)
 
-Do we want that though?
+THE BIG ISSUE - is this payload by book by day
+we want to be able to flexibly format THIS
+
+```python
+@dataclass
+def formatting_target():
+    header
+
+```
 
 
 
