@@ -1,3 +1,34 @@
+# 3rd april
+
+So issue with the fact we need bits of hls and books to make the headings!?!
+
+Plan is to add links BENEATH the HLs in their own section
+
+- [[Readwise Highlights]]
+  - Book_1
+      - Hl_1
+  etc
+- Readwise Links
+  - ((Book_1))
+    - Link_1 Link_2 Link_3
+
+Roam Backend API docs
+https://roamresearch.com/#/app/developer-documentation/page/IEmaIxzTU
+
+
+
+# 2nd April
+
+URLs
+------
+in highlights: url = original source, i.e. tweet, reader for times articles etc
+in books     :  
+
+user_book_id|batch_id|title|is_deleted|author|readable_title|source|cover_image_url|unique_url|summary|category|document_note|readwise_url|source_url|external_id|asin|validated|validation_errors
+
+we are going to need all this - so we need a book obj
+
+
 # 30th March
 
 have a basic graph represenation
