@@ -2,7 +2,7 @@ import uuid
 
 class Node:
     def __init__(self, type_, data):
-        self.id = str(uuid.uuid3)
+        self.id = str(uuid.uuid1())
         self.type = type_
         self.data = data
         self.children = []
