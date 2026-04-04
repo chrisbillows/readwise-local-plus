@@ -252,10 +252,10 @@ class DNHighlightsPayload:
             book = dn_highlight.user_book_id
             self.grouped_highlights[daily_note_date][book].append(dn_highlight)
 
-    
 
-
-def ensure_payload_daily_notes_exist(dn_highlight_payload):
+def ensure_payload_daily_notes_exist(
+        grouped_highlights: defaultdict[date, dict[int, DNHighlight]]
+    ):
     """
     Ensure the daily note for the payload's target date exists in Roam, creating it if necessary.
 
@@ -264,17 +264,15 @@ def ensure_payload_daily_notes_exist(dn_highlight_payload):
     roam_client = RoamClient()
     session = get_session(fetch_user_config().db_path) 
     
-    for daily_note in dn_highlight_payload.keys():
-        # WHAT ARE WE ITERATING OVER HERE?
-        daily_note_uid = roam_client.date_to_roam_daily_note(daily_note)
+    for target_date in grouped_highlights.keys():
+        daily_note_uid = roam_client.date_to_roam_daily_note(target_date)
         existing_page = session.get(RoamKnownPage, daily_note_uid)
         if (
             existing_page is None
             and session.get(RoamKnownPage, daily_note_uid) is None
         ):
-            print("logic trigggered")
             daily_note_long_format = (
-                roam_client._format_daily_note_title_long_format(daily_note)
+                roam_client._format_daily_note_title_long_format(target_date)
             )
             try:
                 roam_client.create_page(daily_note_long_format, exists_ok=True)
@@ -288,8 +286,6 @@ def ensure_payload_daily_notes_exist(dn_highlight_payload):
                 RoamKnownPage(page_uid=daily_note_uid, last_verified_at=datetime.now())
             )
             session.commit()
-        else:
-            print("logic not triggered")
         session.close()
 
 
