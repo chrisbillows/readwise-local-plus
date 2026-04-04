@@ -343,32 +343,6 @@ def create_trees(grouped_highlights, unique_books):
 def main(batch_id: int):
     dnhp = DNHighlightsPayload(batch_id)
     grouped_highlights, unique_books = dnhp.build()
-    
-    print(f"------BATCH {batch_id}-------")
-    for daily_note, book_dict in grouped_highlights.items():
-        print(daily_note)
-        for user_book_id, highlights in book_dict.items():            
-            
-            for book in unique_books:
-                if  user_book_id == book.user_book_id:
-                    book_obj = book
-                    break
-            
-            book_obj: DNBook
-
-            print(f"{book_obj.roam_book_header}")
-            print(f"{book_obj.roam_sub_header}")
-            print(f"{book_obj.roam_links}")
-
-            # for hl in highlights:
-            #     print(f"    {hl}")
-            #     pass
-
-            print()
-
-    
-
-
     # ensure_payload_daily_notes_exist(grouped_highlights)
     
     # for daily_note_date, book_dict in grouped_highlights.items():
