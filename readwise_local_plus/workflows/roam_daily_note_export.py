@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime
 import re
 
@@ -110,7 +110,6 @@ class DNBook:
         Child block of `roam_book_header`. 
 
         Avoids very long book headers.
-        
         """
         sub_header = "#[[rw]]"
 
