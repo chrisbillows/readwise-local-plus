@@ -2,7 +2,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
-import uuid
+import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -27,6 +27,15 @@ from readwise_local_plus.workflows.tree import Node
 
 logger = logging.getLogger(__name__)
 
+
+def strip_markdown_links(s: str) -> str:
+    """
+    Remove markdown links from a string of text.
+
+    Uses a look behind to avoid altering images.
+    """
+    return re.sub(r'(?<!\!)\[([^\]]+)\]\([^)]+\)', r'\1', s)
+
 @dataclass
 class DNHighlight:
     """
@@ -41,6 +50,15 @@ class DNHighlight:
     updated_at: datetime | None
     url: str | None
     readwise_url: str | None
+    
+    @property
+    def roam_highlight(self) -> str:
+        hl = self.text.strip().replace("\n", "")
+        return strip_markdown_links(hl)
+
+    @property
+    def roam_note(self) -> str:
+        return self.note.strip().replace("\n", "") 
 
     def __repr__(self):
         text = self.text[:80].strip().replace("\n", "")
