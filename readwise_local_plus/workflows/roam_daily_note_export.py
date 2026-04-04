@@ -92,9 +92,9 @@ class DNBook:
         """
         clean_title = self.readable_title.strip().replace("\n", "")
 
-        # Re-title tweet threads
+        # Re-title tweet threads (if author)
         if self.category == "tweets":
-            if not clean_title.lower().startswith("tweets from"):
+            if not clean_title.lower().startswith("tweets from") and self.author:
                 # Check it's a twitter handle
                 if self.author.startswith("@"):
                     author = self.author.split(" ")[0][1:] if self.author else "unknown"
@@ -352,7 +352,8 @@ def main(batch_id: int):
     grouped_highlights, unique_books = dnhp.build()
     # ensure_payload_daily_notes_exist(grouped_highlights)
     trees = create_roam_export_trees(grouped_highlights, unique_books)
-    
+
+    # PRINT NODES CONTENT 
     def foo(node: Node):
         print(f"{node.type}: {node.data}")
         for node_obj in node.children:
@@ -363,11 +364,13 @@ def main(batch_id: int):
         foo(node)
    
 
+
+
 if __name__ == "__main__":
     batch_id = 60  
-    main(61)
+    main(1)
     # rc = RoamClient()
     # x = rc.fetch_block_subtree("pQq5WDtmJ")
-    # x = rc.write_child_block("04-03-2026", f"Does this say hello? ((y-hLxZCNr))")
+    # x = rc.write_child_block("04-04-2026", f"Does this say hello? ((y-hLxZCNr))")
     # print(x)
 
