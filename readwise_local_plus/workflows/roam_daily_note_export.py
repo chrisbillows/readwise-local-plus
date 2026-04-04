@@ -159,7 +159,7 @@ class DNHighlightsPayload:
         self._session: Session = get_session(fetch_user_config().db_path)
         self.raw_highlights: list[Highlight] = []
         self.dn_highlights: list[DNHighlight] = []
-        self.dn_books: list[DNBook] = []
+        self.dn_books: dict[int, DNBook] = {}
         self.grouped_highlights: defaultdict[list] = defaultdict(lambda: defaultdict(list))
 
     def build(self) -> tuple[defaultdict[date, dict[int, DNHighlight]], list[DNBook]]:
@@ -240,8 +240,8 @@ class DNHighlightsPayload:
                     source_url=highlight.book.source_url,
                     first_highlight=dn_highlight,
                 )
-                self.dn_books.append(unique_book)
                 unique_user_book_ids.add(highlight.book.user_book_id)
+                self.dn_books[highlight.book.user_book_id] = unique_book
 
     def _group_highlights(self):
         """
