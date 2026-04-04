@@ -193,6 +193,7 @@ class DNHighlightsPayload:
                 - a default dict of DNHighlights grouped by date and by book 
                 - a list of unique DNBooks in the batch
         """
+        logger.info(f"Create Roam Daily Note Payload for batch: {batch_id}")
         self._fetch_raw_highlights()
         self._convert_highlights()
         self._group_highlights()
