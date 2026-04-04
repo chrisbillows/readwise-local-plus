@@ -307,61 +307,67 @@ def ensure_payload_daily_notes_exist(
         session.close()
 
 
-def create_trees(grouped_highlights, unique_books):
-    daily_note_nodes = []
+def create_roam_export_trees(
+        grouped_highlights: defaultdict[date, dict[int, DNHighlight]], 
+        unique_books: dict[int, DNBook]
+    ) -> list[Node]:
+    """
+    Create a list of trees of nested Nodes for each date.
+
+    Returns
+    -------
+    daily_note_nodes
+
+    """
+    daily_note_trees = []
+    
     for daily_note_date, book_dict in grouped_highlights.items():
-        
-        # types
-        daily_note_date: date
-        book_dict: dict[int, DNHighlight]
-        
         daily_note_node = Node("daily_note", daily_note_date)
         
         for user_book_id, highlights in book_dict.items():
+            dn_book = unique_books[user_book_id]
 
-            first_highlight = highlights[0]
-            book_header = ""
-            book_header_node = Node("book_header", book_header)
+            book_header_node = Node("book_header", dn_book.roam_book_header)
             daily_note_node.add_child(book_header_node)
 
-            book_summary_node = Node("book_summary", "#[[rw]] #[[]]")
+            book_summary_node = Node("book_summary", dn_book.roam_sub_header)
             book_header_node.add_child(book_summary_node)
 
             for highlight in highlights:
                 highlight: DNHighlight
-                highlight_node = Node("highlight_text", highlight.text)
+
+                highlight_node = Node("highlight_text", highlight.roam_highlight)
                 book_summary_node.add_child(highlight_node)
-                if highlight.note:
-                    note_node = Node("highlight_note", highlight.note)
+                
+                if highlight.roam_note:
+                    note_node = Node("highlight_note", highlight.roam_note)
                     highlight_node.add_child(note_node)
         
-        daily_note_nodes.append(daily_note_node)
+        daily_note_trees.append(daily_note_node)
 
-    print(daily_note_nodes)
-
+    return daily_note_trees
 
 def main(batch_id: int):
     dnhp = DNHighlightsPayload(batch_id)
     grouped_highlights, unique_books = dnhp.build()
     # ensure_payload_daily_notes_exist(grouped_highlights)
+    trees = create_roam_export_trees(grouped_highlights, unique_books)
     
-    # for daily_note_date, book_dict in grouped_highlights.items():
-                
-    #     print(daily_note_date.isoformat())
-        
-    #     for book_id, highlights in book_dict.items():
-    #         print(f"{book_id} - {len(highlights)} hls")
-        
-    # create trees
-    
-    
+    def foo(node: Node):
+        print(f"{node.type}: {node.data}")
+        for node_obj in node.children:
+            foo(node_obj)
+
+    for node in trees:
+        print("-----------------------")
+        foo(node)
+   
 
 if __name__ == "__main__":
-    # batch_id = 60  
-    # main(61)    
-    rc = RoamClient()
+    batch_id = 60  
+    main(61)
+    # rc = RoamClient()
     # x = rc.fetch_block_subtree("pQq5WDtmJ")
-    x = rc.write_child_block("04-03-2026", f"Does this say hello? ((y-hLxZCNr))")
-    
-    print(x)
+    # x = rc.write_child_block("04-03-2026", f"Does this say hello? ((y-hLxZCNr))")
+    # print(x)
 
