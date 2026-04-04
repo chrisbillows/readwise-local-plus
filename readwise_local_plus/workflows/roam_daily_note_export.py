@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DNHighlight:
-    """Fields required to export a highlight to a Roam Daily Note."""
+    """
+    Fields required to export a highlight to a Roam Daily Note.
+    """
     user_book_id: int
     id: int
     text: str
@@ -48,7 +50,12 @@ class DNHighlight:
     
 @dataclass
 class DNBook:
-    """Fields required to export a book to a Roam Daily Note."""
+    """
+    Fields required to export a book to a Roam Daily Note.
+    
+    Note: `first_highlight` is taken for access to highlight level
+    data e.g. `url` for use in book level links.
+    """
     user_book_id: int
     title: str
     author: str
@@ -62,6 +69,9 @@ class DNBook:
 
     @property
     def roam_book_header(self):
+        """
+        Parent block for the book on a Roam daily note page.
+        """
         clean_title = self.readable_title.strip().replace("\n", "")
 
         # Re-title tweet threads
@@ -78,6 +88,12 @@ class DNBook:
 
     @property
     def roam_sub_header(self):
+        """
+        Child block of `roam_book_header`. 
+
+        Avoids very long book headers.
+        
+        """
         sub_header = "#[[rw]]"
 
         if self.category == "tweets":
@@ -86,12 +102,12 @@ class DNBook:
         elif self.category == "articles":
             sub_header += " #[[articles]]"
             
-            # Include author as linked ref
+            # For articles, include author as linked ref
             author = self.author.title() if self.author else None
             if author:
                 sub_header += f" #[[{author}]]"
 
-            # Include domain of article source e.g. thetimes
+            # For articles, include domain of source url e.g. thetimes
             if isinstance(self.source_url, str):
                 try:
                     domain = extract(self.source_url).top_domain_under_public_suffix
@@ -107,6 +123,11 @@ class DNBook:
 
     @property
     def roam_links(self):
+        """
+        Seperate links from book headers for brevity.
+
+        In Roam block 'edit' mode these are extremely unweidly. 
+        """
         rw_link = self.readwise_url
         rw_reader_link = self.unique_url if self.unique_url else None
         
@@ -145,19 +166,19 @@ class DNHighlightsPayload:
         """
         Build intermediate objects for creating a daily note export tree.
 
-        Book objects are created seperartely to keep the formatting step as flexible
-        as possible.
+        Book objects are created outside of the grouped output. This keeps later 
+        formatting steps as flexible as possible.
 
         Returns
         -------
         tuple[defaultdict[date, dict[int, DNHighlight]], list[DNBook]
-            A tuple containing a default dict of grouped DNHighlights and a list of
-            all the unique DNBooks in the batch.
+            A tuple containing:
+                - a default dict of DNHighlights grouped by date and by book 
+                - a list of unique DNBooks in the batch
         """
         self._fetch_raw_highlights()
         self._convert_highlights()
         self._group_highlights()
-        # self._convert_unique_books()
         self._session.close()
         return (self.grouped_highlights, self.dn_books)
 
@@ -186,7 +207,11 @@ class DNHighlightsPayload:
         logger.info(f"{len(self.raw_highlights)} highlights in batch {self.batch_id}")
 
     def _convert_highlights(self):
+        """
+        Convert raw highlights into DNHighlight and DNBook objects.
+        """
         unique_user_book_ids = set()
+
         for highlight in self.raw_highlights:
             dn_highlight = DNHighlight(
                 user_book_id=highlight.book.user_book_id,
@@ -218,44 +243,9 @@ class DNHighlightsPayload:
                 self.dn_books.append(unique_book)
                 unique_user_book_ids.add(highlight.book.user_book_id)
 
-    # def _convert_unique_books(self):
-    #     """
-    #     Convert each unique book in the batch into a DNBook.
-
-    #     Technically this step is a duplcate loop of the convert highlights
-    #     function (duplicate O(n)) - but for trivial lengths it's keep seperate 
-    #     for clarity.
-    #     """
-    #     unique_user_book_ids = set()
-    #     for hl in self.raw_highlights:
-    #         hl: Highlight
-    #         if hl.book.user_book_id not in unique_user_book_ids:
-                
-    #             unique_book = DNBook(
-    #                 user_book_id=hl.book.user_book_id,
-    #                 title=hl.book.title,
-    #                 author=hl.book.author,
-    #                 readable_title=hl.book.readable_title,
-    #                 source=hl.book.source,
-    #                 category=hl.book.category,
-    #                 unique_url=hl.book.unique_url,
-    #                 readwise_url=hl.book.readwise_url,
-    #                 source_url=hl.book.source_url,
-    #                 first_highlight=hl,
-    #             )
-    #             self.dn_books.append(unique_book)
-    #             unique_user_book_ids.add(hl.book.user_book_id)
-
     def _group_highlights(self):
         """
         Group highlights by daily note date and by book id.
-
-        Example
-        -------
-        ```
-
-        ```
-
         """
         for dn_highlight in self.dn_highlights:
             daily_note_date = dn_highlight.created_at.date()
