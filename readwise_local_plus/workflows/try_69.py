@@ -1,8 +1,8 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from enum import Enum
 import logging
+from random import randint
 import re
 
 from sqlalchemy import select
@@ -18,7 +18,7 @@ from readwise_local_plus.models import Book, Highlight, RoamKnownPage
 logger = logging.getLogger(__name__)
 
 READWISE_HEADER = "[[Readwise highlights]]"
-READWISE_LINKS = "__Readwise Links__"
+READWISE_LINKS = "[[Readwise Links]]"
 
 
 def strip_markdown_links(s: str) -> str:
@@ -141,10 +141,6 @@ class DNBook:
         return f'DNHBook(Title="{self.readable_title}")'
 
 
-class DNExportError(Exception):
-    pass
-
-
 class DNHighlightsPayload:
     """
     Build daily note payload:
@@ -156,8 +152,7 @@ class DNHighlightsPayload:
         self.grouped: dict[date, dict[int, DNBook]] = defaultdict(dict)
 
     def build(self) -> dict[date, list[DNBook]]:
-        # logger.info(f"Create payload for batch: {self.batch_id}")
-        print(f"Create payload for batch: {self.batch_id}")
+        logger.info(f"Create payload for batch: {self.batch_id}")
 
         rows = self._fetch()
 
@@ -230,175 +225,134 @@ class DNHighlightsPayload:
         )
 
 
-def batch_body():
-        return {"action": "batch-actions", "actions": []}
+def ensure_daily_note(target_date: date, rc: RoamClient):
+    session = get_session(fetch_user_config().db_path) 
+    dn_uid = rc.date_to_roam_daily_note(target_date)
+    if not session.get(RoamKnownPage, dn_uid):
+        dn_long = rc._format_daily_note_title_long_format(target_date)
+        try:
+            rc.create_page(dn_long, exists_ok=True)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed to ensure daily note %s exists: %s", dn_uid, exc)
+        session.add(RoamKnownPage(page_uid=dn_uid, last_verified_at=datetime.now()))
+        session.commit()
+    session.close()
+    return dn_uid
 
 
-@dataclass
-class CurrentDNState:
-    hl_body: dict = field(default_factory=batch_body)
-    link_body: dict = field(default_factory=batch_body)
-    active_body: dict = field(init=False)
-    rwh_state: str = "new"
-    book_state: str = "new"
-    links_state: str = "new"
-
-    def __post_init__(self):
-        self.active_body = self.hl_body
-
-
-class DNExporter:
-    """
-    Export grouped highlights to daily notes.
-
-    Notes
-    -----
-    There are two non-intuitive parts to this implimentation.
+def ensure_block_uid(
+        body: dict, 
+        parent_uid: str, 
+        content: str, 
+        uid_gen: TempUidGenerator,
+        rc: RoamClient,
+        heading: int|None = None
+    ) -> str | None:
+    child_blocks = rc.fetch_child_blocks(parent_uid)
+    if child_blocks:
+        for block in child_blocks:
+            block_content = list(block.keys())[0]
+            if block_content == content:
+                return list(block.values())[0]
     
-    - `active_body` : dict 
-        is switched between `hl_body` and `link_body`. These are batch 
-        action bodies that are written to Roam seperarely so link body can work with
-        resolved uids. `active_body` lives on the object to allow for simplicity in
-        batch action creation logic i.e. all methods just operate on 'active_body'.
+    temp_uid = add_action(body, parent_uid, content, uid_gen, heading)
+    return temp_uid
 
-    - `rwh_state`, `book_state` etc : str
-        are switched between "new" or "exists". They are passed to `_decide` which uses
-        switch status to call either check if a uid already exists (`ensure`) which is
-        expensive, or just create a new temp uid via a new batch action (`create`). 
-        NOTE: `ensure` also calls `create` directly if a uid doesn't exist.
-        The state values are set to "new" and changed to "exist" in `ensure_block_uid` 
-        i.e. immediately when we find the block already exists.
 
-    Therefore these values change depending on progress through an export loop: therefore
-    use with caution!
-    """
+def add_action(
+        body: dict, 
+        parent_uid: str, 
+        content: str, 
+        uid_gen: TempUidGenerator,
+        heading: int|None = None
+    ) -> dict:
+    temp_uid = uid_gen.next()
+    location = {"order": "last", "parent-uid": parent_uid}
+    block = {"string": content, "uid": temp_uid}
+    
+    if heading:
+        block['heading'] = heading
+    
+    body["actions"].append(
+        {"action": "create-block", "location": location, "block": block}
+    )
+    return temp_uid
 
-    def __init__(self, grouped_highlights: dict[date, list[DNBook]]):
-        self.grouped_highlights = grouped_highlights
-        self.uid_gen = TempUidGenerator()
-        self.rc = RoamClient()
-        self.state = CurrentDNState()
 
-    def export(self):
-        print("Exporting...")
-        for date_as_date, list_bks in self.grouped_highlights.items():
-            print(f"To daily note: {date_as_date.isoformat()} ")
+def write_to_roam(grouped_highlights):
+    uid_gen = TempUidGenerator()
+    rc = RoamClient()
+    hl_body = {"action": "batch-actions", "actions": []}
+    link_body = {"action": "batch-actions", "actions": []}
 
-            self.state = CurrentDNState()
+    for date_as_date, list_bks in grouped_highlights.items():
+        dn_uid = ensure_daily_note(date_as_date, rc)
+        
+        # Use ensure as rw header / links may already exist
+        rw_header_uid = ensure_block_uid(hl_body, dn_uid, READWISE_HEADER, uid_gen, rc, 1)
 
-            dn_uid = self._ensure_daily_note(date_as_date)
-            rw_header_uid = self._ensure_block_uid(dn_uid, READWISE_HEADER, 1)
+        for book in list_bks:
+            # Temp uids will be negative ints
+            if not isinstance(rw_header_uid, int):
+                # As rw header exists, use ensure as books may exist
+                # Ensure is slower as requires API call
+                book_header_uid = ensure_block_uid(
+                    hl_body, rw_header_uid, book.roam_book_header, uid_gen, rc, 3)
+                book_summary_uid = ensure_block_uid(
+                    hl_body, book_header_uid, book.roam_sub_header, uid_gen, rc)
+            else:
+                book_header_uid = add_action(
+                    hl_body, rw_header_uid, book.roam_book_header, uid_gen, 3)
+                book_summary_uid = add_action(
+                    hl_body, book_header_uid, book.roam_sub_header, uid_gen)
 
-            for book in list_bks:
-                print(f"Book:  {book.readable_title[:40]:40} Total Highlights: {len(list_bks)}")
-                bh_uid = self._decide(self.state.rwh_state, rw_header_uid, book.roam_book_header, 3) 
-                b_summary_uid = self._decide(self.state.book_state, bh_uid, book.roam_sub_header)
+            # Links need resolved UIDs to embed under book headers
+            # Add temp uids to book objs here, then reconcile
+            book.book_header_uid = book_header_uid
 
-                # `roam_links` need resolved UIDs to embed under block ref'd book header
-                # Add temp uids to book objs here, then reconcile
-                book.book_header_uid = bh_uid
+            for hl in book.highlights:
+                    hl_uid = add_action(hl_body, book_summary_uid, hl.roam_highlight, uid_gen)
+                    if hl.roam_note:
+                        add_action(hl_body, hl_uid, hl.roam_note, uid_gen)
 
-                for hl in book.highlights:
-                        hl_uid = self._create_action(b_summary_uid, hl.roam_highlight)
-                        if hl.roam_note:
-                            self._create_action(hl_uid, hl.roam_note)
+        response_json = rc._write(hl_body)
 
-            response_json = self.rc._write(self.state.hl_body)
+        rw_links_uid = ensure_block_uid(link_body, dn_uid, READWISE_LINKS, uid_gen, rc, 1)
 
-            self.state.active_body = self.state.link_body
-
-            rw_links_uid = self._ensure_block_uid(dn_uid, READWISE_LINKS)
-            temp_ids_to_uids = response_json['tempids-to-uids']
-
-            for book in list_bks:
-                if self.state.links_state == "new":
-                    book.book_header_uid = temp_ids_to_uids[str(book.book_header_uid)]
-                book_link_header = f"(({book.book_header_uid}))"
-                header_uid = self._decide(self.state.links_state, rw_links_uid, book_link_header)
-                # Technically links could already exist but I don't care
-                self._create_action(header_uid, book.roam_links)
+        tempd_ids_to_uids = response_json['tempids-to-uids']
+        for book in list_bks:
+            book: DNBook
+            book.book_header_uid = tempd_ids_to_uids[str(book.book_header_uid)]
+            book_link_header = f"(({book.book_header_uid}))"
+            if not isinstance(rw_links_uid, int):
+                header_uid = ensure_block_uid(
+                    link_body, rw_links_uid, book_link_header, uid_gen, rc, 3
+                    )
+            else:
+                header_uid = add_action(
+                    link_body, rw_links_uid, book_link_header, uid_gen, 3
+                    )
             
-            response_json = self.rc._write(self.state.link_body)
-
-    def _ensure_daily_note(self, target_date: date):
-        session = get_session(fetch_user_config().db_path) 
-        dn_uid = self.rc.date_to_roam_daily_note(target_date)
-        
-        if not session.get(RoamKnownPage, dn_uid):
-            dn_long = self.rc._format_daily_note_title_long_format(target_date)
-            try:
-                self.rc.create_page(dn_long, exists_ok=True)
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.warning("Failed to ensure daily note %s exists: %s", dn_uid, exc)
-            session.add(RoamKnownPage(page_uid=dn_uid, last_verified_at=datetime.now()))
-            session.commit()
-        
-        session.close()
-        
-        return dn_uid
-
-    def _decide(self, relevant_state: str, *args):
-        """
-        Decide between calling `ensure` or `create` based on if parent uid exists.
-
-        i.e. if the RW header doesn't exist, the book can't exist. We want to call
-        `create` immediately as `ensure` is expensive.
-        """
-        if relevant_state == "new":
-            temp_uid = self._create_action(*args)
-
-        elif relevant_state == "exists":    
-            temp_uid = self._ensure_block_uid(*args)
-        else:
-            raise DNExportError("uid switch status not recognised")
-        
-        return temp_uid
-
-    def _set_state(self, content):
-        if content == READWISE_HEADER:
-            self.state.rwh_state = "exists"
-        elif content == READWISE_LINKS:
-            self.state.links_state = "exists"
-        else:
-            self.state.book_state = "exists"
-
-    def _ensure_block_uid(
-        self, parent_uid: str, content: str, heading: int|None = None
-        ) -> str | None:
-        child_blocks = self.rc.fetch_child_blocks(parent_uid)
-        if child_blocks:
-            for block in child_blocks:
-                block_content = list(block.keys())[0]
-                if block_content == content:
-                    self._set_state(content)
-                    return list(block.values())[0]
-        
-        temp_uid = self._create_action(parent_uid, content, heading)
-        return temp_uid
-
-    def _create_action(
-            self, parent_uid: str, content: str, heading: int|None = None
-        ) -> dict:
-        temp_uid = self.uid_gen.next()
-        location = {"order": "last", "parent-uid": parent_uid}
-        block = {"string": content, "uid": temp_uid}
-        
-        if heading:
-            block['heading'] = heading
-        
-        self.state.active_body["actions"].append(
-            {"action": "create-block", "location": location, "block": block}
-        )
-        return temp_uid
+            book_links = add_action(link_body, header_uid, book.roam_links, uid_gen)
+        response_json = rc._write(link_body)
 
 
 def main():
     dnhp = DNHighlightsPayload(60)
     grouped_highlights = dnhp.build()
-    dne = DNExporter(grouped_highlights)
-    dne.export()
+
+    # Strip out one example and overwrite group highlights
+    example_date = list(grouped_highlights.keys())[0]
+    example_books = grouped_highlights[example_date]
+    dn = date(2026, 4, 5)
+    grouped_highlights = {}
+    grouped_highlights[dn] = example_books
+
+    write_to_roam(grouped_highlights)
 
 
 if __name__ == "__main__":
     main()
     
+
+

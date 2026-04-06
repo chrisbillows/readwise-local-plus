@@ -307,7 +307,7 @@ class DNExporter:
 
             self.state.active_body = self.state.link_body
 
-            rw_links_uid = self._ensure_block_uid(dn_uid, READWISE_LINKS)
+            rw_links_uid = self._ensure_block_uid(dn_uid, READWISE_LINKS, 1)
             temp_ids_to_uids = response_json['tempids-to-uids']
 
             for book in list_bks:
@@ -402,3 +402,5 @@ def main():
 if __name__ == "__main__":
     main()
     
+
+

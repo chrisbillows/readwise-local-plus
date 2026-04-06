@@ -1,3 +1,26 @@
+# 5th April
+
+- dn will always exist
+  - but it will not always be the parent
+  - if the header exists, then   
+
+
+Are we trying to do too much, we are creating only EXPORT nodes, we could create empty nodes?
+
+{}
+
+
+
+# 4th april
+
+don't forget 
+
+RW HEADER
+- need to check if rw header alraedy exists
+- need to add readwise header itself
+- need to check if book already exists
+
+
 # 3rd april
 
 So issue with the fact we need bits of hls and books to make the headings!?!
