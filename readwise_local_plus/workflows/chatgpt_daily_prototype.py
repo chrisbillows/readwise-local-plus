@@ -346,9 +346,9 @@ class DNExporter:
         self.node_builder = RoamExportNodeBuilder(self.state.page_uid)
         self.hl_re_nodes: list[RoamExportNode] = []
         self.link_re_nodes: list[RoamExportNode] = []
-        self.target_re_nodes = self.hl_re_nodes
+        self.target_re_nodes: list[RoamExportNode] | None = None
 
-    def build_batch_actions(self) -> None:
+    def _build_hl_roam_export_nodes(self) -> None:
         if self.state.rw_header_uid is not None:
             header_uid = self.state.rw_header_uid
         else:
@@ -414,6 +414,8 @@ class DNExporter:
     def export(self) -> DailyNoteExportResult:
         self._ensure_daily_note()
 
+        self.target_re_nodes = self.hl_re_nodes
+        self._build_hl_roam_export_nodes()
         if self.hl_re_nodes:
             roam_api_response = self._rc._write(batch_action_body(self.hl_re_nodes)) or {}
             tempid_map = roam_api_response.get("tempids-to-uids", {})
@@ -421,7 +423,7 @@ class DNExporter:
                 re_node.resolve(tempid_map)
 
         self.target_re_nodes = self.link_re_nodes
-        self._build_link_actions()
+        self._build_link_roam_export_nodes()
         if self.link_re_nodes:
             roam_api_response = self._rc._write(batch_action_body(self.link_re_nodes)) or {}
             tempid_map = roam_api_response.get("tempids-to-uids", {})
@@ -480,7 +482,7 @@ class DNExporter:
         self._session.flush()
 
 
-    def _build_link_actions(self) -> None:
+    def _build_link_roam_export_nodes(self) -> None:
         child_blocks = self._rc.fetch_child_blocks(self.state.page_uid) or []
         links_header_uid = self._find_existing_child_uid(child_blocks, READWISE_LINKS)
 
@@ -755,7 +757,6 @@ def main() -> None:
     for target_date, books in grouped_highlights.items():
         logger.info("To daily note: %s", target_date.isoformat())
         dn_export = DNExporter(target_date, books, rc, session)
-        dn_export.build_batch_actions()
         results.append(dn_export.export())
 
     session.close()
