@@ -348,6 +348,33 @@ class DNExporter:
         self.link_re_nodes: list[RoamExportNode] = []
         self.target_re_nodes: list[RoamExportNode] | None = None
 
+    def export(self) -> DailyNoteExportResult:
+        self._ensure_daily_note()
+
+        self.target_re_nodes = self.hl_re_nodes
+        self._build_hl_roam_export_nodes()
+        if self.hl_re_nodes:
+            roam_api_response = self._rc._write(batch_action_body(self.hl_re_nodes)) or {}
+            tempid_map = roam_api_response.get("tempids-to-uids", {})
+            for re_node in self.hl_re_nodes:
+                re_node.resolve(tempid_map)
+
+        self.target_re_nodes = self.link_re_nodes
+        self._build_link_roam_export_nodes()
+        if self.link_re_nodes:
+            roam_api_response = self._rc._write(batch_action_body(self.link_re_nodes)) or {}
+            tempid_map = roam_api_response.get("tempids-to-uids", {})
+            for re_node in self.link_re_nodes:
+                re_node.resolve(tempid_map)
+
+        return DailyNoteExportResult(
+            target_date=self.target_date,
+            page_uid=self.state.page_uid,
+            rw_header_uid=self.state.rw_header_uid,
+            content_nodes=self.hl_re_nodes,
+            link_nodes=self.link_re_nodes,
+        )
+    
     def _build_hl_roam_export_nodes(self) -> None:
         if self.state.rw_header_uid is not None:
             header_uid = self.state.rw_header_uid
@@ -411,33 +438,48 @@ class DNExporter:
                     )
                     self.target_re_nodes.append(note_node)
 
-    def export(self) -> DailyNoteExportResult:
-        self._ensure_daily_note()
+    def _build_link_roam_export_nodes(self) -> None:
+        child_blocks = self._rc.fetch_child_blocks(self.state.page_uid) or []
+        links_header_uid = self._find_existing_child_uid(child_blocks, READWISE_LINKS)
 
-        self.target_re_nodes = self.hl_re_nodes
-        self._build_hl_roam_export_nodes()
-        if self.hl_re_nodes:
-            roam_api_response = self._rc._write(batch_action_body(self.hl_re_nodes)) or {}
-            tempid_map = roam_api_response.get("tempids-to-uids", {})
-            for re_node in self.hl_re_nodes:
-                re_node.resolve(tempid_map)
+        if links_header_uid is None:
+            links_header_node = self.node_builder.instantiate_node(
+                "links_header", self.state.page_uid, READWISE_LINKS
+            )
+            self.target_re_nodes.append(links_header_node)
+            links_header_uid = links_header_node.uid
 
-        self.target_re_nodes = self.link_re_nodes
-        self._build_link_roam_export_nodes()
-        if self.link_re_nodes:
-            roam_api_response = self._rc._write(batch_action_body(self.link_re_nodes)) or {}
-            tempid_map = roam_api_response.get("tempids-to-uids", {})
-            for re_node in self.link_re_nodes:
-                re_node.resolve(tempid_map)
+        existing_link_children: list[dict[str, str]] = []
+        if not isinstance(links_header_uid, int):
+            existing_link_children = self._rc.fetch_child_blocks(links_header_uid) or []
 
-        return DailyNoteExportResult(
-            target_date=self.target_date,
-            page_uid=self.state.page_uid,
-            rw_header_uid=self.state.rw_header_uid,
-            content_nodes=self.hl_re_nodes,
-            link_nodes=self.link_re_nodes,
-        )
-    
+        for book in self.books:
+            book_uid = self._resolve_book_uid(book.user_book_id)
+            book_link_header = f"(({book_uid}))"
+            existing_link_uid = self._find_existing_child_uid(
+                existing_link_children, book_link_header
+            )
+
+            if existing_link_uid is None:
+                book_link_header_node = self.node_builder.instantiate_node(
+                    "book_link_header",
+                    links_header_uid,
+                    book_link_header,
+                    None,
+                    book.user_book_id,
+                )
+                self.target_re_nodes.append(book_link_header_node)
+                existing_link_uid = book_link_header_node.uid
+
+            book_link_node = self.node_builder.instantiate_node(
+                "book_link",
+                existing_link_uid,
+                book.roam_links,
+                None,
+                book.user_book_id,
+            )
+            self.target_re_nodes.append(book_link_node)
+
     def _load_existing_state(self) -> ExistingDNState:
         page_uid = self._rc.date_to_roam_daily_note(self.target_date)
         tracked_page = self._session.get(RoamPage, page_uid)
@@ -480,49 +522,6 @@ class DNExporter:
             RoamKnownPage(page_uid=self.state.page_uid, last_verified_at=datetime.now())
         )
         self._session.flush()
-
-
-    def _build_link_roam_export_nodes(self) -> None:
-        child_blocks = self._rc.fetch_child_blocks(self.state.page_uid) or []
-        links_header_uid = self._find_existing_child_uid(child_blocks, READWISE_LINKS)
-
-        if links_header_uid is None:
-            links_header_node = self.node_builder.instantiate_node(
-                "links_header", self.state.page_uid, READWISE_LINKS
-            )
-            self.target_re_nodes.append(links_header_node)
-            links_header_uid = links_header_node.uid
-
-        existing_link_children: list[dict[str, str]] = []
-        if not isinstance(links_header_uid, int):
-            existing_link_children = self._rc.fetch_child_blocks(links_header_uid) or []
-
-        for book in self.books:
-            book_uid = self._resolve_book_uid(book.user_book_id)
-            book_link_header = f"(({book_uid}))"
-            existing_link_uid = self._find_existing_child_uid(
-                existing_link_children, book_link_header
-            )
-
-            if existing_link_uid is None:
-                book_link_header_node = self.node_builder.instantiate_node(
-                    "book_link_header",
-                    links_header_uid,
-                    book_link_header,
-                    None,
-                    book.user_book_id,
-                )
-                self.target_re_nodes.append(book_link_header_node)
-                existing_link_uid = book_link_header_node.uid
-
-            book_link_node = self.node_builder.instantiate_node(
-                "book_link",
-                existing_link_uid,
-                book.roam_links,
-                None,
-                book.user_book_id,
-            )
-            self.target_re_nodes.append(book_link_node)
 
     def _resolve_book_uid(self, user_book_id: int) -> str:
         existing_book = self.state.book_header_uids.get(user_book_id)
