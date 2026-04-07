@@ -315,11 +315,11 @@ class RoamExportNodeBuilder:
 
 
 @dataclass
-class DailyNoteExportResult:
+class DNExportResult:
     target_date: date
     page_uid: str
     rw_header_uid: str | None
-    content_nodes: list[RoamExportNode]
+    hl_nodes: list[RoamExportNode]
     link_nodes: list[RoamExportNode]
 
 
@@ -341,7 +341,7 @@ class DNExporter:
         self.link_re_nodes: list[RoamExportNode] = []
         self.target_re_nodes: list[RoamExportNode] | None = None
 
-    def export(self) -> DailyNoteExportResult:
+    def export(self) -> DNExportResult:
         self._ensure_daily_note()
 
         self.target_re_nodes = self.hl_re_nodes
@@ -368,11 +368,11 @@ class DNExporter:
             for re_node in self.link_re_nodes:
                 re_node.resolve(tempid_map)
 
-        return DailyNoteExportResult(
+        return DNExportResult(
             target_date=self.target_date,
             page_uid=self.state.page_uid,
             rw_header_uid=self.state.rw_header_uid,
-            content_nodes=self.hl_re_nodes,
+            hl_nodes=self.hl_re_nodes,
             link_nodes=self.link_re_nodes,
         )
     
@@ -557,11 +557,11 @@ class DNExportWriteback:
 
     def persist(
         self,
-        result: DailyNoteExportResult,
+        result: DNExportResult,
         export_batch: RoamExportBatch,
     ) -> None:
         page = self._upsert_page_row(result, export_batch)
-        self._persist_content_rows(result.content_nodes, export_batch)
+        self._persist_content_rows(result.hl_nodes, export_batch)
         self._create_page_snapshot(
             page_uid=result.page_uid,
             header_uid=page.highlights_header_uid,
@@ -571,7 +571,7 @@ class DNExportWriteback:
 
     def persist_many(
         self,
-        results: list[DailyNoteExportResult],
+        results: list[DNExportResult],
     ) -> None:
         export_batch = RoamExportBatch(database_write_time=datetime.now())
         self._session.add(export_batch)
@@ -582,14 +582,14 @@ class DNExportWriteback:
 
     def _upsert_page_row(
         self,
-        result: DailyNoteExportResult,
+        result: DNExportResult,
         export_batch: RoamExportBatch,
     ) -> RoamPage:
         tracked_page = self._session.get(RoamPage, result.page_uid)
         header_action = next(
             (
                 action
-                for action in result.content_nodes
+                for action in result.hl_nodes
                 if action.kind == "readwise_header"
             ),
             None,
@@ -749,7 +749,7 @@ def main() -> None:
     grouped_highlights = dnhp.build()
     rc = RoamClient()
     session: Session = get_session(fetch_user_config().db_path)
-    results: list[DailyNoteExportResult] = []
+    results: list[DNExportResult] = []
 
     logger.info("Exporting...")
     for target_date, books in grouped_highlights.items():
