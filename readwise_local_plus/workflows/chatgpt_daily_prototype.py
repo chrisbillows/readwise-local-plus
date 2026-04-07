@@ -344,7 +344,7 @@ class DNExporterPrototype:
         target_date: date,
         books: list[DNBook],
     ) -> DailyNoteExportResult:
-        state = self._load_existing_state(target_date, books)
+        state = self._load_existing_state(target_date)
         self._ensure_daily_note(target_date, state)
 
         batch_actions = self._build_content_actions(state, books)
@@ -364,14 +364,12 @@ class DNExporterPrototype:
             link_actions=link_actions,
         )
 
-    def _load_existing_state(
-        self, target_date: date, books: list[DNBook]
-    ) -> ExistingDNState:
+    def _load_existing_state(self, target_date: date) -> ExistingDNState:
         page_uid = self._rc.date_to_roam_daily_note(target_date)
         tracked_page = self._session.get(RoamPage, page_uid)
         known_page = self._session.get(RoamKnownPage, page_uid)
 
-        book_exports = {
+        existing_book_header_uids = {
             row.user_book_id: row.parent_block_uid
             for row in self._session.query(RoamBookExport).filter_by(page_uid=page_uid)
         }
@@ -387,7 +385,7 @@ class DNExporterPrototype:
             rw_header_uid=(
                 tracked_page.highlights_header_uid if tracked_page is not None else None
             ),
-            book_header_uids=book_exports,
+            book_header_uids=existing_book_header_uids,
             highlight_ids=highlight_ids,
         )
 
