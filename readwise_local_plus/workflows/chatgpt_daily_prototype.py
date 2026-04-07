@@ -268,18 +268,14 @@ class RoamExportNode:
     resolved_uid: str | None = None
     export_date: datetime = field(default_factory=datetime.now)
 
-    @property
-    def is_temp_uid(self) -> bool:
-        return isinstance(self.uid, int)
-
     def resolve(self, tempid_map: dict[str, str]) -> None:
-        if self.is_temp_uid:
+        if isinstance(self.uid, int):
             resolved = tempid_map.get(str(self.uid))
             if resolved is None:
                 raise ValueError(f"Temp UID {self.uid} missing from Roam response")
             self.resolved_uid = resolved
         else:
-            self.resolved_uid = str(self.uid)
+            self.resolved_uid = self.uid
 
 
 class RoamExportNodeBuilder:
