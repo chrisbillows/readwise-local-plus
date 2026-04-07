@@ -256,7 +256,7 @@ class ExistingDNState:
 
 
 @dataclass
-class RoamBatchAction:
+class RoamExportNode:
     kind: ActionKind
     body: dict[str, Any]
     uid: str | int
@@ -282,23 +282,53 @@ class RoamBatchAction:
             self.resolved_uid = str(self.uid)
 
 
-@dataclass
-class RoamBatchActionList:
-    actions: list[RoamBatchAction] = field(default_factory=list)
+class RoamExportNodeBuilder:
+    def __init__(self, page_uid: str) -> None:
+        self.page_uid = page_uid
+        self._uid_gen = TempUidGenerator()
 
-    @property
-    def batch_action_body(self) -> dict[str, Any]:
-        return {
-            "action": "batch-actions",
-            "actions": [action.body for action in self.actions],
-        }
+    def instantiate_node(
+        self,
+        kind: ActionKind,
+        parent_uid: str | int,
+        content: str,
+        heading: int | None = None,
+        user_book_id: int | None = None,
+        highlight_id: int | None = None,
+        is_primary_highlight: bool = False,
+    ) -> RoamExportNode:
+        uid = self._uid_gen.next()
+        block: dict[str, Any] = {"string": content, "uid": uid}
+        if heading is not None:
+            block["heading"] = heading
 
-    def append(self, action: RoamBatchAction) -> None:
-        self.actions.append(action)
+        return RoamExportNode(
+            kind=kind,
+            body={
+                "action": "create-block",
+                "location": {"order": "last", "parent-uid": parent_uid},
+                "block": block,
+            },
+            uid=uid,
+            page_uid=self.page_uid,
+            user_book_id=user_book_id,
+            highlight_id=highlight_id,
+            is_primary_highlight=is_primary_highlight,
+        )
 
-    def resolve(self, tempid_map: dict[str, str]) -> None:
-        for action in self.actions:
-            action.resolve(tempid_map)
+
+def batch_action_body(nodes: list[RoamExportNode]) -> dict[str, Any]:
+    return {
+        "action": "batch-actions",
+        "actions": [node.body for node in nodes],
+    }
+
+
+def resolve_actions(
+    nodes: list[RoamExportNode], tempid_map: dict[str, str]
+) -> None:
+    for node in nodes:
+        node.resolve(tempid_map)
 
 
 @dataclass
@@ -312,60 +342,30 @@ class DailyNoteExportResult:
     target_date: date
     page_uid: str
     rw_header_uid: str | None
-    content_actions: RoamBatchActionList
-    link_actions: RoamBatchActionList
+    content_nodes: list[RoamExportNode]
+    link_nodes: list[RoamExportNode]
 
 
-class DNExporterPrototype:
-    """
-    Prototype exporter that keeps the refactor's flow but stores write intent and
-    export metadata together on action objects instead of using mutable state flags.
-    """
-
-    def __init__(self, grouped_highlights: dict[date, list[DNBook]]) -> None:
-        self.grouped_highlights = grouped_highlights
-        self._uid_gen = TempUidGenerator()
-        self._rc = RoamClient()
-        self._session: Session = get_session(fetch_user_config().db_path)
-
-    def export(self) -> list[DailyNoteExportResult]:
-        logger.info("Exporting...")
-        results: list[DailyNoteExportResult] = []
-
-        for target_date, books in self.grouped_highlights.items():
-            logger.info("To daily note: %s", target_date.isoformat())
-            results.append(self._export_daily_note(target_date, books))
-
-        self._session.close()
-        return results
-
-    def _export_daily_note(
+class DNExporter:
+    def __init__(
         self,
         target_date: date,
         books: list[DNBook],
-    ) -> DailyNoteExportResult:
-        state = self._load_existing_state(target_date)
-        self._ensure_daily_note(target_date, state)
+        roam_client: RoamClient,
+        session: Session,
+    ) -> None:
+        self.target_date = target_date
+        self.books = books
+        self._rc = roam_client
+        self._session = session
+        self.state = self.load_existing_state()
+        self.node_builder = RoamExportNodeBuilder(self.state.page_uid)
+        self.hl_re_nodes: list[RoamExportNode] = []
+        self.link_re_nodes: list[RoamExportNode] = []
+        self.target_re_nodes = self.hl_re_nodes
 
-        batch_actions = self._build_content_actions(state, books)
-        write_response = self._execute_batch_actions(batch_actions)
-        batch_actions.resolve(write_response.get("tempids-to-uids", {}))
-
-        link_actions = self._build_link_actions(state, books, batch_actions)
-        if link_actions.actions:
-            write_response = self._execute_batch_actions(link_actions)
-            link_actions.resolve(write_response.get("tempids-to-uids", {}))
-
-        return DailyNoteExportResult(
-            target_date=target_date,
-            page_uid=state.page_uid,
-            rw_header_uid=state.rw_header_uid,
-            content_actions=batch_actions,
-            link_actions=link_actions,
-        )
-
-    def _load_existing_state(self, target_date: date) -> ExistingDNState:
-        page_uid = self._rc.date_to_roam_daily_note(target_date)
+    def load_existing_state(self) -> ExistingDNState:
+        page_uid = self._rc.date_to_roam_daily_note(self.target_date)
         tracked_page = self._session.get(RoamPage, page_uid)
         known_page = self._session.get(RoamKnownPage, page_uid)
 
@@ -389,211 +389,165 @@ class DNExporterPrototype:
             highlight_ids=highlight_ids,
         )
 
-    def _ensure_daily_note(
-        self, target_date: date, state: ExistingDNState
-    ) -> None:
-        if state.page_exists:
+    def export(self) -> DailyNoteExportResult:
+        self._ensure_daily_note()
+
+        write_response = self._execute_batch_actions(self.hl_re_nodes)
+        resolve_actions(self.hl_re_nodes, write_response.get("tempids-to-uids", {}))
+
+        self.target_re_nodes = self.link_re_nodes
+        self._build_link_actions()
+        if self.link_re_nodes:
+            write_response = self._execute_batch_actions(self.link_re_nodes)
+            resolve_actions(self.link_re_nodes, write_response.get("tempids-to-uids", {}))
+
+        return DailyNoteExportResult(
+            target_date=self.target_date,
+            page_uid=self.state.page_uid,
+            rw_header_uid=self.state.rw_header_uid,
+            content_nodes=self.hl_re_nodes,
+            link_nodes=self.link_re_nodes,
+        )
+
+    def _ensure_daily_note(self) -> None:
+        if self.state.page_exists:
             return
 
-        dn_long = self._rc._format_daily_note_title_long_format(target_date)
+        dn_long = self._rc._format_daily_note_title_long_format(self.target_date)
         try:
             self._rc.create_page(dn_long, exists_ok=True)
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("Failed to ensure daily note %s exists: %s", state.page_uid, exc)
+            logger.warning(
+                "Failed to ensure daily note %s exists: %s", self.state.page_uid, exc
+            )
             return
 
         self._session.add(
-            RoamKnownPage(page_uid=state.page_uid, last_verified_at=datetime.now())
+            RoamKnownPage(page_uid=self.state.page_uid, last_verified_at=datetime.now())
         )
         self._session.flush()
 
-    def _build_content_actions(
-        self,
-        state: ExistingDNState,
-        books: list[DNBook],
-    ) -> RoamBatchActionList:
-        actions = RoamBatchActionList()
-
-        if state.rw_header_uid is not None:
-            header_uid = state.rw_header_uid
+    def build_batch_actions(self) -> None:
+        if self.state.rw_header_uid is not None:
+            header_uid = self.state.rw_header_uid
         else:
-            header_uid = self._append_action(
-                actions=actions,
-                kind="readwise_header",
-                parent_uid=state.page_uid,
-                content=READWISE_HEADER,
-                page_uid=state.page_uid,
-                heading=1,
+            node = self.node_builder.instantiate_node(
+                "readwise_header", self.state.page_uid, READWISE_HEADER, 1
             )
+            self.target_re_nodes.append(node)
+            header_uid = node.uid
 
-        for book in books:
+        for book in self.books:
             logger.info("Book: %s", book.readable_title[:40])
 
-            existing_book = state.book_header_uids.get(book.user_book_id)
+            existing_book = self.state.book_header_uids.get(book.user_book_id)
             if existing_book is not None:
                 book_header_uid = existing_book
             else:
-                book_header_uid = self._append_action(
-                    actions=actions,
-                    kind="book_header",
-                    parent_uid=header_uid,
-                    content=book.roam_book_header,
-                    page_uid=state.page_uid,
-                    user_book_id=book.user_book_id,
-                    heading=3,
+                node = self.node_builder.instantiate_node(
+                    "book_header",
+                    header_uid,
+                    book.roam_book_header,
+                    3,
+                    book.user_book_id,
                 )
+                self.target_re_nodes.append(node)
+                book_header_uid = node.uid
 
-            sub_header_uid = self._append_action(
-                actions=actions,
-                kind="book_sub_header",
-                parent_uid=book_header_uid,
-                content=book.roam_sub_header,
-                page_uid=state.page_uid,
-                user_book_id=book.user_book_id,
+            node = self.node_builder.instantiate_node(
+                "book_sub_header",
+                book_header_uid,
+                book.roam_sub_header,
+                None,
+                book.user_book_id,
             )
+            self.target_re_nodes.append(node)
+            sub_header_uid = node.uid
 
             for hl in book.highlights:
-                if hl.id in state.highlight_ids:
+                if hl.id in self.state.highlight_ids:
                     continue
 
-                render_result = self._render_highlight(
-                    actions=actions,
-                    page_uid=state.page_uid,
-                    parent_uid=sub_header_uid,
-                    highlight=hl,
-                )
+                render_result = self._render_highlight(sub_header_uid, hl)
 
-                for action in actions.actions:
-                    if action.highlight_id == hl.id and action.is_primary_highlight:
-                        action.block_tree = render_result.block_tree
+                for node in self.hl_re_nodes:
+                    if node.highlight_id == hl.id and node.is_primary_highlight:
+                        node.block_tree = render_result.block_tree
                         break
 
-        return actions
-
-    def _build_link_actions(
-        self,
-        state: ExistingDNState,
-        books: list[DNBook],
-        content_actions: RoamBatchActionList,
-    ) -> RoamBatchActionList:
-        actions = RoamBatchActionList()
-        child_blocks = self._rc.fetch_child_blocks(state.page_uid) or []
+    def _build_link_actions(self) -> None:
+        child_blocks = self._rc.fetch_child_blocks(self.state.page_uid) or []
         links_header_uid = self._find_existing_child_uid(child_blocks, READWISE_LINKS)
 
         if links_header_uid is None:
-            links_header_uid = self._append_action(
-                actions=actions,
-                kind="links_header",
-                parent_uid=state.page_uid,
-                content=READWISE_LINKS,
-                page_uid=state.page_uid,
+            node = self.node_builder.instantiate_node(
+                "links_header", self.state.page_uid, READWISE_LINKS
             )
+            self.target_re_nodes.append(node)
+            links_header_uid = node.uid
 
         existing_link_children: list[dict[str, str]] = []
         if not isinstance(links_header_uid, int):
             existing_link_children = self._rc.fetch_child_blocks(links_header_uid) or []
 
-        for book in books:
-            book_uid = self._resolve_book_uid(
-                state=state,
-                content_actions=content_actions,
-                user_book_id=book.user_book_id,
-            )
+        for book in self.books:
+            book_uid = self._resolve_book_uid(book.user_book_id)
             book_link_header = f"(({book_uid}))"
             existing_link_uid = self._find_existing_child_uid(
                 existing_link_children, book_link_header
             )
 
             if existing_link_uid is None:
-                existing_link_uid = self._append_action(
-                    actions=actions,
-                    kind="book_link_header",
-                    parent_uid=links_header_uid,
-                    content=book_link_header,
-                    page_uid=state.page_uid,
-                    user_book_id=book.user_book_id,
+                node = self.node_builder.instantiate_node(
+                    "book_link_header",
+                    links_header_uid,
+                    book_link_header,
+                    None,
+                    book.user_book_id,
                 )
+                self.target_re_nodes.append(node)
+                existing_link_uid = node.uid
 
-            self._append_action(
-                actions=actions,
-                kind="book_link",
-                parent_uid=existing_link_uid,
-                content=book.roam_links,
-                page_uid=state.page_uid,
-                user_book_id=book.user_book_id,
+            node = self.node_builder.instantiate_node(
+                "book_link",
+                existing_link_uid,
+                book.roam_links,
+                None,
+                book.user_book_id,
             )
-
-        return actions
-
-    def _append_action(
-        self,
-        actions: RoamBatchActionList,
-        kind: ActionKind,
-        parent_uid: str | int,
-        content: str,
-        page_uid: str,
-        *,
-        user_book_id: int | None = None,
-        highlight_id: int | None = None,
-        is_primary_highlight: bool = False,
-        heading: int | None = None,
-    ) -> str | int:
-        uid = self._uid_gen.next()
-        block: dict[str, Any] = {"string": content, "uid": uid}
-        if heading is not None:
-            block["heading"] = heading
-
-        body = {
-            "action": "create-block",
-            "location": {"order": "last", "parent-uid": parent_uid},
-            "block": block,
-        }
-
-        actions.append(
-            RoamBatchAction(
-                kind=kind,
-                body=body,
-                uid=uid,
-                page_uid=page_uid,
-                user_book_id=user_book_id,
-                highlight_id=highlight_id,
-                is_primary_highlight=is_primary_highlight,
-            )
-        )
-        return uid
+            self.target_re_nodes.append(node)
 
     def _render_highlight(
         self,
-        actions: RoamBatchActionList,
-        page_uid: str,
         parent_uid: str | int,
         highlight: DNHighlight,
     ) -> HighlightRenderResult:
-        highlight_uid = self._append_action(
-            actions=actions,
-            kind="highlight",
-            parent_uid=parent_uid,
-            content=highlight.roam_highlight,
-            page_uid=page_uid,
-            highlight_id=highlight.id,
-            user_book_id=highlight.user_book_id,
-            is_primary_highlight=True,
+        node = self.node_builder.instantiate_node(
+            "highlight",
+            parent_uid,
+            highlight.roam_highlight,
+            None,
+            highlight.user_book_id,
+            highlight.id,
+            True,
         )
+        self.target_re_nodes.append(node)
+        highlight_uid = node.uid
 
         children: list[dict[str, Any]] = []
         if highlight.roam_note:
-            note_uid = self._append_action(
-                actions=actions,
-                kind="note",
-                parent_uid=highlight_uid,
-                content=highlight.roam_note,
-                page_uid=page_uid,
-                highlight_id=highlight.id,
-                user_book_id=highlight.user_book_id,
+            note_node = self.node_builder.instantiate_node(
+                "note",
+                highlight_uid,
+                highlight.roam_note,
+                None,
+                highlight.user_book_id,
+                highlight.id,
             )
+            self.target_re_nodes.append(note_node)
             children.append(
                 {
-                    "uid": note_uid,
+                    "uid": note_node.uid,
                     "text": highlight.roam_note,
                     "order": None,
                     "children": [],
@@ -610,26 +564,21 @@ class DNExporterPrototype:
             },
         )
 
-    def _execute_batch_actions(self, actions: RoamBatchActionList) -> dict[str, Any]:
-        if not actions.actions:
+    def _execute_batch_actions(self, nodes: list[RoamExportNode]) -> dict[str, Any]:
+        if not nodes:
             return {}
-        return self._rc._write(actions.batch_action_body) or {}
+        return self._rc._write(batch_action_body(nodes)) or {}
 
-    def _resolve_book_uid(
-        self,
-        state: ExistingDNState,
-        content_actions: RoamBatchActionList,
-        user_book_id: int,
-    ) -> str:
-        existing_book = state.book_header_uids.get(user_book_id)
+    def _resolve_book_uid(self, user_book_id: int) -> str:
+        existing_book = self.state.book_header_uids.get(user_book_id)
         if existing_book is not None:
             return existing_book
 
-        for action in content_actions.actions:
-            if action.kind == "book_header" and action.user_book_id == user_book_id:
-                if action.resolved_uid is None:
+        for node in self.hl_re_nodes:
+            if node.kind == "book_header" and node.user_book_id == user_book_id:
+                if node.resolved_uid is None:
                     raise ValueError(f"Book action for {user_book_id} was not resolved")
-                return action.resolved_uid
+                return node.resolved_uid
 
         raise ValueError(f"No book UID found for {user_book_id}")
 
@@ -659,7 +608,7 @@ class DNExportWriteback:
         export_batch: RoamExportBatch,
     ) -> None:
         page = self._upsert_page_row(result, export_batch)
-        self._persist_content_rows(result.content_actions, export_batch)
+        self._persist_content_rows(result.content_nodes, export_batch)
         self._create_page_snapshot(
             page_uid=result.page_uid,
             header_uid=page.highlights_header_uid,
@@ -687,7 +636,7 @@ class DNExportWriteback:
         header_action = next(
             (
                 action
-                for action in result.content_actions.actions
+                for action in result.content_nodes
                 if action.kind == "readwise_header"
             ),
             None,
@@ -715,10 +664,10 @@ class DNExportWriteback:
 
     def _persist_content_rows(
         self,
-        content_actions: RoamBatchActionList,
+        content_nodes: list[RoamExportNode],
         export_batch: RoamExportBatch,
     ) -> None:
-        for action in content_actions.actions:
+        for action in content_nodes:
             if action.kind == "book_header" and action.user_book_id is not None:
                 self._session.add(
                     RoamBookExport(
@@ -748,7 +697,7 @@ class DNExportWriteback:
                 if action.block_tree is not None:
                     snapshot_tree = self._resolve_block_tree(
                         action.block_tree,
-                        content_actions,
+                        content_nodes,
                     )
                     snapshot_version = self._get_next_highlight_snapshot_version(
                         action.highlight_id
@@ -795,11 +744,11 @@ class DNExportWriteback:
     def _resolve_block_tree(
         self,
         block_tree: dict[str, Any],
-        actions: RoamBatchActionList,
+        nodes: list[RoamExportNode],
     ) -> dict[str, Any]:
-        resolved_uid = self._resolve_uid_from_actions(block_tree["uid"], actions)
+        resolved_uid = self._resolve_uid_from_actions(block_tree["uid"], nodes)
         children = [
-            self._resolve_block_tree(child, actions)
+            self._resolve_block_tree(child, nodes)
             for child in block_tree.get("children", [])
         ]
         return {
@@ -816,16 +765,16 @@ class DNExportWriteback:
 
     @staticmethod
     def _resolve_uid_from_actions(
-        uid: str | int, actions: RoamBatchActionList
+        uid: str | int, nodes: list[RoamExportNode]
     ) -> str:
         if isinstance(uid, str):
             return uid
 
-        for action in actions.actions:
-            if action.uid == uid:
-                if action.resolved_uid is None:
+        for node in nodes:
+            if node.uid == uid:
+                if node.resolved_uid is None:
                     raise ValueError(f"UID {uid} was not resolved")
-                return action.resolved_uid
+                return node.resolved_uid
 
         raise ValueError(f"UID {uid} not found in action list")
 
@@ -833,9 +782,19 @@ class DNExportWriteback:
 def main() -> None:
     dnhp = DNHighlightsPayload(60)
     grouped_highlights = dnhp.build()
-    exporter = DNExporterPrototype(grouped_highlights)
-    results = exporter.export()
-    writeback = DNExportWriteback(exporter._rc)
+    rc = RoamClient()
+    session: Session = get_session(fetch_user_config().db_path)
+    results: list[DailyNoteExportResult] = []
+
+    logger.info("Exporting...")
+    for target_date, books in grouped_highlights.items():
+        logger.info("To daily note: %s", target_date.isoformat())
+        dn_export = DNExporter(target_date, books, rc, session)
+        dn_export.build_batch_actions()
+        results.append(dn_export.export())
+
+    session.close()
+    writeback = DNExportWriteback(rc)
     writeback.persist_many(results)
 
 
