@@ -227,13 +227,32 @@ class DNHighlightsPayload:
 
 
 @dataclass
-class ExistingDailyNoteState:
+class ExistingDNState:
+    """
+    Known state of a single daily note, sourced from db.
+
+    Attributes
+    ----------
+    page_uid : str
+        The roam daily note uid e.g. the date in "MM-DD-YYYY".
+    page_exists : bool
+        If the page is known to exist.
+    rw_header_uid : str | None
+        The roam block uid if the header has already been written, else None.
+    book_header_uids : dict[int, str]
+        A dict of existing book headers where the key is the 'user_book_id' and the
+        value is the roam block uid. Will be an empty dict if no book headers exist. 
+    highlight_ids : set[int] 
+        A set of Readwise highlight 'id' already exported for this page. Will be an 
+        empty set if no highlights exist. 
+        NOTE: Stores ids only. We never use highlights as parents for new objects 
+        (i.e. a new note on an existing highlight is currently not written).
+    """
     page_uid: str
-    known_page_exists: bool
-    tracked_header_uid: str | None
-    book_uids_by_book_id: dict[int, str]
-    exported_highlight_uids_by_highlight_id: dict[int, str]
-    latest_snapshot_version_by_highlight_id: dict[int, int]
+    page_exists: bool
+    rw_header_uid: str | None
+    book_header_uids: dict[int, str]
+    highlight_ids: set[int]
 
 
 @dataclass
@@ -292,7 +311,7 @@ class HighlightRenderResult:
 class DailyNoteExportResult:
     target_date: date
     page_uid: str
-    tracked_header_uid: str | None
+    rw_header_uid: str | None
     content_actions: RoamBatchActionList
     link_actions: RoamBatchActionList
 
@@ -340,14 +359,14 @@ class DNExporterPrototype:
         return DailyNoteExportResult(
             target_date=target_date,
             page_uid=state.page_uid,
-            tracked_header_uid=state.tracked_header_uid,
+            rw_header_uid=state.rw_header_uid,
             content_actions=batch_actions,
             link_actions=link_actions,
         )
 
     def _load_existing_state(
         self, target_date: date, books: list[DNBook]
-    ) -> ExistingDailyNoteState:
+    ) -> ExistingDNState:
         page_uid = self._rc.date_to_roam_daily_note(target_date)
         tracked_page = self._session.get(RoamPage, page_uid)
         known_page = self._session.get(RoamKnownPage, page_uid)
@@ -357,41 +376,25 @@ class DNExporterPrototype:
             for row in self._session.query(RoamBookExport).filter_by(page_uid=page_uid)
         }
 
-        highlight_exports = {
-            row.highlight_id: row.block_uid
+        highlight_ids = {
+            row.highlight_id
             for row in self._session.query(RoamHighlightExport).filter_by(page_uid=page_uid)
         }
 
-        highlight_ids = [hl.id for book in books for hl in book.highlights]
-        last_snapshots: dict[int, int] = {}
-        if highlight_ids:
-            snapshot_rows = (
-                self._session.query(RoamHighlightSnapshot)
-                .filter(RoamHighlightSnapshot.highlight_id.in_(highlight_ids))
-                .order_by(
-                    RoamHighlightSnapshot.highlight_id,
-                    RoamHighlightSnapshot.version.desc(),
-                )
-                .all()
-            )
-            for row in snapshot_rows:
-                last_snapshots.setdefault(row.highlight_id, row.version)
-
-        return ExistingDailyNoteState(
+        return ExistingDNState(
             page_uid=page_uid,
-            known_page_exists=known_page is not None,
-            tracked_header_uid=(
+            page_exists=(known_page is not None or tracked_page is not None),
+            rw_header_uid=(
                 tracked_page.highlights_header_uid if tracked_page is not None else None
             ),
-            book_uids_by_book_id=book_exports,
-            exported_highlight_uids_by_highlight_id=highlight_exports,
-            latest_snapshot_version_by_highlight_id=last_snapshots,
+            book_header_uids=book_exports,
+            highlight_ids=highlight_ids,
         )
 
     def _ensure_daily_note(
-        self, target_date: date, state: ExistingDailyNoteState
+        self, target_date: date, state: ExistingDNState
     ) -> None:
-        if state.known_page_exists or state.tracked_header_uid is not None:
+        if state.page_exists:
             return
 
         dn_long = self._rc._format_daily_note_title_long_format(target_date)
@@ -407,13 +410,13 @@ class DNExporterPrototype:
 
     def _build_content_actions(
         self,
-        state: ExistingDailyNoteState,
+        state: ExistingDNState,
         books: list[DNBook],
     ) -> RoamBatchActionList:
         actions = RoamBatchActionList()
 
-        if state.tracked_header_uid is not None:
-            header_uid = state.tracked_header_uid
+        if state.rw_header_uid is not None:
+            header_uid = state.rw_header_uid
         else:
             header_uid = self._append_action(
                 actions=actions,
@@ -427,7 +430,7 @@ class DNExporterPrototype:
         for book in books:
             logger.info("Book: %s", book.readable_title[:40])
 
-            existing_book = state.book_uids_by_book_id.get(book.user_book_id)
+            existing_book = state.book_header_uids.get(book.user_book_id)
             if existing_book is not None:
                 book_header_uid = existing_book
             else:
@@ -451,7 +454,7 @@ class DNExporterPrototype:
             )
 
             for hl in book.highlights:
-                if hl.id in state.exported_highlight_uids_by_highlight_id:
+                if hl.id in state.highlight_ids:
                     continue
 
                 render_result = self._render_highlight(
@@ -461,22 +464,16 @@ class DNExporterPrototype:
                     highlight=hl,
                 )
 
-                last_snapshot_version = state.latest_snapshot_version_by_highlight_id.get(
-                    hl.id
-                )
-                next_version = (last_snapshot_version + 1) if last_snapshot_version else 1
-
                 for action in actions.actions:
                     if action.highlight_id == hl.id and action.is_primary_highlight:
                         action.block_tree = render_result.block_tree
-                        action.body.setdefault("_snapshot_version", next_version)
                         break
 
         return actions
 
     def _build_link_actions(
         self,
-        state: ExistingDailyNoteState,
+        state: ExistingDNState,
         books: list[DNBook],
         content_actions: RoamBatchActionList,
     ) -> RoamBatchActionList:
@@ -621,11 +618,11 @@ class DNExporterPrototype:
 
     def _resolve_book_uid(
         self,
-        state: ExistingDailyNoteState,
+        state: ExistingDNState,
         content_actions: RoamBatchActionList,
         user_book_id: int,
     ) -> str:
-        existing_book = state.book_uids_by_book_id.get(user_book_id)
+        existing_book = state.book_header_uids.get(user_book_id)
         if existing_book is not None:
             return existing_book
 
@@ -699,7 +696,7 @@ class DNExportWriteback:
         header_uid = (
             header_action.resolved_uid
             if header_action is not None
-            else result.tracked_header_uid
+            else result.rw_header_uid
         )
 
         if tracked_page is None:
@@ -754,7 +751,9 @@ class DNExportWriteback:
                         action.block_tree,
                         content_actions,
                     )
-                    snapshot_version = action.body.get("_snapshot_version", 1)
+                    snapshot_version = self._get_next_highlight_snapshot_version(
+                        action.highlight_id
+                    )
                     self._session.add(
                         RoamHighlightSnapshot(
                             highlight_id=action.highlight_id,
@@ -765,6 +764,15 @@ class DNExportWriteback:
                             export_batch=export_batch,
                         )
                     )
+
+    def _get_next_highlight_snapshot_version(self, highlight_id: int) -> int:
+        latest_snapshot = (
+            self._session.query(RoamHighlightSnapshot)
+            .filter_by(highlight_id=highlight_id)
+            .order_by(RoamHighlightSnapshot.version.desc())
+            .first()
+        )
+        return (latest_snapshot.version + 1) if latest_snapshot is not None else 1
 
     def _create_page_snapshot(
         self,
@@ -828,7 +836,7 @@ def main() -> None:
     grouped_highlights = dnhp.build()
     exporter = DNExporterPrototype(grouped_highlights)
     results = exporter.export()
-    writeback = DNExportWriteback(exporter.rc)
+    writeback = DNExportWriteback(exporter._rc)
     writeback.persist_many(results)
 
 
