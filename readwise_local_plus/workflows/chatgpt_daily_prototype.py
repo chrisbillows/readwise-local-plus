@@ -346,7 +346,7 @@ class DailyNoteExportResult:
     link_nodes: list[RoamExportNode]
 
 
-class DNExport:
+class DNExporter:
     def __init__(
         self,
         target_date: date,
@@ -368,11 +368,11 @@ class DNExport:
         if self.state.rw_header_uid is not None:
             header_uid = self.state.rw_header_uid
         else:
-            node = self.node_builder.instantiate_node(
+            rw_header_node = self.node_builder.instantiate_node(
                 "readwise_header", self.state.page_uid, READWISE_HEADER, 1
             )
-            self.target_re_nodes.append(node)
-            header_uid = node.uid
+            self.target_re_nodes.append(rw_header_node)
+            header_uid = rw_header_node.uid
 
         for book in self.books:
             logger.info("Book: %s", book.readable_title[:40])
@@ -381,25 +381,25 @@ class DNExport:
             if existing_book is not None:
                 book_header_uid = existing_book
             else:
-                node = self.node_builder.instantiate_node(
+                book_header_node = self.node_builder.instantiate_node(
                     "book_header",
                     header_uid,
                     book.roam_book_header,
                     3,
                     book.user_book_id,
                 )
-                self.target_re_nodes.append(node)
-                book_header_uid = node.uid
+                self.target_re_nodes.append(book_header_node)
+                book_header_uid = book_header_node.uid
 
-            node = self.node_builder.instantiate_node(
+            book_sub_header_node = self.node_builder.instantiate_node(
                 "book_sub_header",
                 book_header_uid,
                 book.roam_sub_header,
                 None,
                 book.user_book_id,
             )
-            self.target_re_nodes.append(node)
-            sub_header_uid = node.uid
+            self.target_re_nodes.append(book_sub_header_node)
+            sub_header_uid = book_sub_header_node.uid
 
             for hl in book.highlights:
                 if hl.id in self.state.highlight_ids:
@@ -407,9 +407,12 @@ class DNExport:
 
                 render_result = self._render_highlight(sub_header_uid, hl)
 
-                for node in self.hl_re_nodes:
-                    if node.highlight_id == hl.id and node.is_primary_highlight:
-                        node.block_tree = render_result.block_tree
+                for highlight_node in self.hl_re_nodes:
+                    if (
+                        highlight_node.highlight_id == hl.id
+                        and highlight_node.is_primary_highlight
+                    ):
+                        highlight_node.block_tree = render_result.block_tree
                         break
 
     def export(self) -> DailyNoteExportResult:
@@ -481,11 +484,11 @@ class DNExport:
         links_header_uid = self._find_existing_child_uid(child_blocks, READWISE_LINKS)
 
         if links_header_uid is None:
-            node = self.node_builder.instantiate_node(
+            links_header_node = self.node_builder.instantiate_node(
                 "links_header", self.state.page_uid, READWISE_LINKS
             )
-            self.target_re_nodes.append(node)
-            links_header_uid = node.uid
+            self.target_re_nodes.append(links_header_node)
+            links_header_uid = links_header_node.uid
 
         existing_link_children: list[dict[str, str]] = []
         if not isinstance(links_header_uid, int):
@@ -499,31 +502,31 @@ class DNExport:
             )
 
             if existing_link_uid is None:
-                node = self.node_builder.instantiate_node(
+                book_link_header_node = self.node_builder.instantiate_node(
                     "book_link_header",
                     links_header_uid,
                     book_link_header,
                     None,
                     book.user_book_id,
                 )
-                self.target_re_nodes.append(node)
-                existing_link_uid = node.uid
+                self.target_re_nodes.append(book_link_header_node)
+                existing_link_uid = book_link_header_node.uid
 
-            node = self.node_builder.instantiate_node(
+            book_link_node = self.node_builder.instantiate_node(
                 "book_link",
                 existing_link_uid,
                 book.roam_links,
                 None,
                 book.user_book_id,
             )
-            self.target_re_nodes.append(node)
+            self.target_re_nodes.append(book_link_node)
 
     def _render_highlight(
         self,
         parent_uid: str | int,
         highlight: HighlightFromDB,
     ) -> HighlightRenderResult:
-        node = self.node_builder.instantiate_node(
+        highlight_node = self.node_builder.instantiate_node(
             "highlight",
             parent_uid,
             highlight.roam_highlight,
@@ -532,8 +535,8 @@ class DNExport:
             highlight.id,
             True,
         )
-        self.target_re_nodes.append(node)
-        highlight_uid = node.uid
+        self.target_re_nodes.append(highlight_node)
+        highlight_uid = highlight_node.uid
 
         children: list[dict[str, Any]] = []
         if highlight.roam_note:
@@ -790,7 +793,7 @@ def main() -> None:
     logger.info("Exporting...")
     for target_date, books in grouped_highlights.items():
         logger.info("To daily note: %s", target_date.isoformat())
-        dn_export = DNExport(target_date, books, rc, session)
+        dn_export = DNExporter(target_date, books, rc, session)
         dn_export.build_batch_actions()
         results.append(dn_export.export())
 
