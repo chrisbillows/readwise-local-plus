@@ -358,74 +358,11 @@ class DNExport:
         self.books = books
         self._rc = roam_client
         self._session = session
-        self.state = self.load_existing_state()
+        self.state = self._load_existing_state()
         self.node_builder = RoamExportNodeBuilder(self.state.page_uid)
         self.hl_re_nodes: list[RoamExportNode] = []
         self.link_re_nodes: list[RoamExportNode] = []
         self.target_re_nodes = self.hl_re_nodes
-
-    def load_existing_state(self) -> ExistingDNState:
-        page_uid = self._rc.date_to_roam_daily_note(self.target_date)
-        tracked_page = self._session.get(RoamPage, page_uid)
-        known_page = self._session.get(RoamKnownPage, page_uid)
-
-        existing_book_header_uids = {
-            row.user_book_id: row.parent_block_uid
-            for row in self._session.query(RoamBookExport).filter_by(page_uid=page_uid)
-        }
-
-        highlight_ids = {
-            row.highlight_id
-            for row in self._session.query(RoamHighlightExport).filter_by(page_uid=page_uid)
-        }
-
-        return ExistingDNState(
-            page_uid=page_uid,
-            page_exists=(known_page is not None or tracked_page is not None),
-            rw_header_uid=(
-                tracked_page.highlights_header_uid if tracked_page is not None else None
-            ),
-            book_header_uids=existing_book_header_uids,
-            highlight_ids=highlight_ids,
-        )
-
-    def export(self) -> DailyNoteExportResult:
-        self._ensure_daily_note()
-
-        write_response = self._execute_batch_actions(self.hl_re_nodes)
-        resolve_actions(self.hl_re_nodes, write_response.get("tempids-to-uids", {}))
-
-        self.target_re_nodes = self.link_re_nodes
-        self._build_link_actions()
-        if self.link_re_nodes:
-            write_response = self._execute_batch_actions(self.link_re_nodes)
-            resolve_actions(self.link_re_nodes, write_response.get("tempids-to-uids", {}))
-
-        return DailyNoteExportResult(
-            target_date=self.target_date,
-            page_uid=self.state.page_uid,
-            rw_header_uid=self.state.rw_header_uid,
-            content_nodes=self.hl_re_nodes,
-            link_nodes=self.link_re_nodes,
-        )
-
-    def _ensure_daily_note(self) -> None:
-        if self.state.page_exists:
-            return
-
-        dn_long = self._rc._format_daily_note_title_long_format(self.target_date)
-        try:
-            self._rc.create_page(dn_long, exists_ok=True)
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning(
-                "Failed to ensure daily note %s exists: %s", self.state.page_uid, exc
-            )
-            return
-
-        self._session.add(
-            RoamKnownPage(page_uid=self.state.page_uid, last_verified_at=datetime.now())
-        )
-        self._session.flush()
 
     def build_batch_actions(self) -> None:
         if self.state.rw_header_uid is not None:
@@ -474,6 +411,70 @@ class DNExport:
                     if node.highlight_id == hl.id and node.is_primary_highlight:
                         node.block_tree = render_result.block_tree
                         break
+
+    def export(self) -> DailyNoteExportResult:
+        self._ensure_daily_note()
+
+        write_response = self._execute_batch_actions(self.hl_re_nodes)
+        resolve_actions(self.hl_re_nodes, write_response.get("tempids-to-uids", {}))
+
+        self.target_re_nodes = self.link_re_nodes
+        self._build_link_actions()
+        if self.link_re_nodes:
+            write_response = self._execute_batch_actions(self.link_re_nodes)
+            resolve_actions(self.link_re_nodes, write_response.get("tempids-to-uids", {}))
+
+        return DailyNoteExportResult(
+            target_date=self.target_date,
+            page_uid=self.state.page_uid,
+            rw_header_uid=self.state.rw_header_uid,
+            content_nodes=self.hl_re_nodes,
+            link_nodes=self.link_re_nodes,
+        )
+    
+    def _load_existing_state(self) -> ExistingDNState:
+        page_uid = self._rc.date_to_roam_daily_note(self.target_date)
+        tracked_page = self._session.get(RoamPage, page_uid)
+        known_page = self._session.get(RoamKnownPage, page_uid)
+
+        existing_book_header_uids = {
+            row.user_book_id: row.parent_block_uid
+            for row in self._session.query(RoamBookExport).filter_by(page_uid=page_uid)
+        }
+
+        highlight_ids = {
+            row.highlight_id
+            for row in self._session.query(RoamHighlightExport).filter_by(page_uid=page_uid)
+        }
+
+        return ExistingDNState(
+            page_uid=page_uid,
+            page_exists=(known_page is not None or tracked_page is not None),
+            rw_header_uid=(
+                tracked_page.highlights_header_uid if tracked_page is not None else None
+            ),
+            book_header_uids=existing_book_header_uids,
+            highlight_ids=highlight_ids,
+        )
+
+    def _ensure_daily_note(self) -> None:
+        if self.state.page_exists:
+            return
+
+        dn_long = self._rc._format_daily_note_title_long_format(self.target_date)
+        try:
+            self._rc.create_page(dn_long, exists_ok=True)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning(
+                "Failed to ensure daily note %s exists: %s", self.state.page_uid, exc
+            )
+            return
+
+        self._session.add(
+            RoamKnownPage(page_uid=self.state.page_uid, last_verified_at=datetime.now())
+        )
+        self._session.flush()
+
 
     def _build_link_actions(self) -> None:
         child_blocks = self._rc.fetch_child_blocks(self.state.page_uid) or []
