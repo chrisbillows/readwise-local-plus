@@ -260,11 +260,11 @@ class RoamExportNode:
     kind: ActionKind
     body: dict[str, Any]
     uid: str | int
+    parent_uid: str | int
     page_uid: str
     user_book_id: int | None = None
     highlight_id: int | None = None
     is_primary_highlight: bool = False
-    block_tree: dict[str, Any] | None = None
     resolved_uid: str | None = None
     export_date: datetime = field(default_factory=datetime.now)
 
@@ -310,6 +310,7 @@ class RoamExportNodeBuilder:
                 "block": block,
             },
             uid=uid,
+            parent_uid=parent_uid,
             page_uid=self.page_uid,
             user_book_id=user_book_id,
             highlight_id=highlight_id,
@@ -329,12 +330,6 @@ def resolve_actions(
 ) -> None:
     for node in nodes:
         node.resolve(tempid_map)
-
-
-@dataclass
-class HighlightRenderResult:
-    primary_uid: str | int
-    block_tree: dict[str, Any]
 
 
 @dataclass
@@ -405,15 +400,27 @@ class DNExporter:
                 if hl.id in self.state.highlight_ids:
                     continue
 
-                render_result = self._render_highlight(sub_header_uid, hl)
+                highlight_node = self.node_builder.instantiate_node(
+                    "highlight",
+                    sub_header_uid,
+                    hl.roam_highlight,
+                    None,
+                    hl.user_book_id,
+                    hl.id,
+                    True,
+                )
+                self.target_re_nodes.append(highlight_node)
 
-                for highlight_node in self.hl_re_nodes:
-                    if (
-                        highlight_node.highlight_id == hl.id
-                        and highlight_node.is_primary_highlight
-                    ):
-                        highlight_node.block_tree = render_result.block_tree
-                        break
+                if hl.roam_note:
+                    note_node = self.node_builder.instantiate_node(
+                        "note",
+                        highlight_node.uid,
+                        hl.roam_note,
+                        None,
+                        hl.user_book_id,
+                        hl.id,
+                    )
+                    self.target_re_nodes.append(note_node)
 
     def export(self) -> DailyNoteExportResult:
         self._ensure_daily_note()
@@ -520,53 +527,6 @@ class DNExporter:
                 book.user_book_id,
             )
             self.target_re_nodes.append(book_link_node)
-
-    def _render_highlight(
-        self,
-        parent_uid: str | int,
-        highlight: HighlightFromDB,
-    ) -> HighlightRenderResult:
-        highlight_node = self.node_builder.instantiate_node(
-            "highlight",
-            parent_uid,
-            highlight.roam_highlight,
-            None,
-            highlight.user_book_id,
-            highlight.id,
-            True,
-        )
-        self.target_re_nodes.append(highlight_node)
-        highlight_uid = highlight_node.uid
-
-        children: list[dict[str, Any]] = []
-        if highlight.roam_note:
-            note_node = self.node_builder.instantiate_node(
-                "note",
-                highlight_uid,
-                highlight.roam_note,
-                None,
-                highlight.user_book_id,
-                highlight.id,
-            )
-            self.target_re_nodes.append(note_node)
-            children.append(
-                {
-                    "uid": note_node.uid,
-                    "text": highlight.roam_note,
-                    "order": None,
-                    "children": [],
-                }
-            )
-
-        return HighlightRenderResult(
-            primary_uid=highlight_uid,
-            block_tree={
-                "uid": highlight_uid,
-                "text": highlight.roam_highlight,
-                "order": None,
-                "children": children,
-            },
-        )
 
     def _execute_batch_actions(self, nodes: list[RoamExportNode]) -> dict[str, Any]:
         if not nodes:
@@ -698,24 +658,20 @@ class DNExportWriteback:
                     )
                 )
 
-                if action.block_tree is not None:
-                    snapshot_tree = self._resolve_block_tree(
-                        action.block_tree,
-                        content_nodes,
+                snapshot_tree = self._build_highlight_snapshot_tree(action, content_nodes)
+                snapshot_version = self._get_next_highlight_snapshot_version(
+                    action.highlight_id
+                )
+                self._session.add(
+                    RoamHighlightSnapshot(
+                        highlight_id=action.highlight_id,
+                        block_tree=snapshot_tree,
+                        block_tree_hash=self.stable_hash(snapshot_tree),
+                        version=snapshot_version,
+                        created_at=datetime.now(),
+                        export_batch=export_batch,
                     )
-                    snapshot_version = self._get_next_highlight_snapshot_version(
-                        action.highlight_id
-                    )
-                    self._session.add(
-                        RoamHighlightSnapshot(
-                            highlight_id=action.highlight_id,
-                            block_tree=snapshot_tree,
-                            block_tree_hash=self.stable_hash(snapshot_tree),
-                            version=snapshot_version,
-                            created_at=datetime.now(),
-                            export_batch=export_batch,
-                        )
-                    )
+                )
 
     def _get_next_highlight_snapshot_version(self, highlight_id: int) -> int:
         latest_snapshot = (
@@ -745,19 +701,35 @@ class DNExportWriteback:
             )
         )
 
-    def _resolve_block_tree(
+    def _build_highlight_snapshot_tree(
         self,
-        block_tree: dict[str, Any],
+        highlight_node: RoamExportNode,
         nodes: list[RoamExportNode],
     ) -> dict[str, Any]:
-        resolved_uid = self._resolve_uid_from_actions(block_tree["uid"], nodes)
-        children = [
-            self._resolve_block_tree(child, nodes)
-            for child in block_tree.get("children", [])
+        child_nodes = [
+            node
+            for node in nodes
+            if node.parent_uid == highlight_node.uid and node.highlight_id == highlight_node.highlight_id
         ]
+        children = [self._build_snapshot_tree(child_node, nodes) for child_node in child_nodes]
         return {
-            **block_tree,
-            "uid": resolved_uid,
+            "uid": self._resolve_uid_from_actions(highlight_node.uid, nodes),
+            "text": highlight_node.body["block"]["string"],
+            "order": None,
+            "children": children,
+        }
+
+    def _build_snapshot_tree(
+        self,
+        node: RoamExportNode,
+        nodes: list[RoamExportNode],
+    ) -> dict[str, Any]:
+        child_nodes = [child for child in nodes if child.parent_uid == node.uid]
+        children = [self._build_snapshot_tree(child_node, nodes) for child_node in child_nodes]
+        return {
+            "uid": self._resolve_uid_from_actions(node.uid, nodes),
+            "text": node.body["block"]["string"],
+            "order": None,
             "children": children,
         }
 
