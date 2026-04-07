@@ -325,13 +325,6 @@ def batch_action_body(nodes: list[RoamExportNode]) -> dict[str, Any]:
     }
 
 
-def resolve_actions(
-    nodes: list[RoamExportNode], tempid_map: dict[str, str]
-) -> None:
-    for node in nodes:
-        node.resolve(tempid_map)
-
-
 @dataclass
 class DailyNoteExportResult:
     target_date: date
@@ -427,19 +420,17 @@ class DNExporter:
 
         if self.hl_re_nodes:
             roam_api_response = self._rc._write(batch_action_body(self.hl_re_nodes)) or {}
-            resolve_actions(
-                self.hl_re_nodes,
-                roam_api_response.get("tempids-to-uids", {}),
-            )
+            tempid_map = roam_api_response.get("tempids-to-uids", {})
+            for re_node in self.hl_re_nodes:
+                re_node.resolve(tempid_map)
 
         self.target_re_nodes = self.link_re_nodes
         self._build_link_actions()
         if self.link_re_nodes:
             roam_api_response = self._rc._write(batch_action_body(self.link_re_nodes)) or {}
-            resolve_actions(
-                self.link_re_nodes,
-                roam_api_response.get("tempids-to-uids", {}),
-            )
+            tempid_map = roam_api_response.get("tempids-to-uids", {})
+            for re_node in self.link_re_nodes:
+                re_node.resolve(tempid_map)
 
         return DailyNoteExportResult(
             target_date=self.target_date,
