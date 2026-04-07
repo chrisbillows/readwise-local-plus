@@ -439,42 +439,27 @@ class DNExporter:
                     self.target_re_nodes.append(note_node)
 
     def _build_link_roam_export_nodes(self) -> None:
-        # Link Headers are not yet stored in Db. Fetch live page state.
-        child_blocks = self._rc.fetch_child_blocks(self.state.page_uid) or []
-        links_header_uid = self._find_existing_child_uid(child_blocks, READWISE_LINKS)
-
-        if links_header_uid is None:
-            links_header_node = self.node_builder.instantiate_node(
-                "links_header", self.state.page_uid, READWISE_LINKS
-            )
-            self.target_re_nodes.append(links_header_node)
-            links_header_uid = links_header_node.uid
-
-        existing_link_children: list[dict[str, str]] = []
-        if not isinstance(links_header_uid, int):
-            existing_link_children = self._rc.fetch_child_blocks(links_header_uid) or []
+        # Link headers are not yet stored in db. Fetch the live page tree once and
+        # inspect it locally to avoid multiple Roam API reads.
+        page_tree = self._rc.fetch_block_subtree(self.state.page_uid) or {}
+        page_children = page_tree.get("children", [])
+        links_header_uid, header_children = self._get_or_create_child(
+            page_children, self.state.page_uid, READWISE_LINKS, "links_header",
+        )
 
         for book in self.books:
             book_uid = self._resolve_book_uid(book.user_book_id)
             book_link_header = f"(({book_uid}))"
-            existing_link_uid = self._find_existing_child_uid(
-                existing_link_children, book_link_header
+            book_link_header_uid, _ = self._get_or_create_child(
+                header_children, links_header_uid,
+                book_link_header,
+                "book_link_header",
+                book.user_book_id,
             )
-
-            if existing_link_uid is None:
-                book_link_header_node = self.node_builder.instantiate_node(
-                    "book_link_header",
-                    links_header_uid,
-                    book_link_header,
-                    None,
-                    book.user_book_id,
-                )
-                self.target_re_nodes.append(book_link_header_node)
-                existing_link_uid = book_link_header_node.uid
 
             book_link_node = self.node_builder.instantiate_node(
                 "book_link",
-                existing_link_uid,
+                book_link_header_uid,
                 book.roam_links,
                 None,
                 book.user_book_id,
@@ -537,15 +522,27 @@ class DNExporter:
 
         raise ValueError(f"No book UID found for {user_book_id}")
 
-    @staticmethod
-    def _find_existing_child_uid(
-        child_blocks: list[dict[str, str]], content: str
-    ) -> str | None:
+    def _get_or_create_child(
+        self,
+        child_blocks: list[dict[str, Any]],
+        parent_uid: str | int,
+        content: str,
+        kind: ActionKind,
+        user_book_id: int | None = None,
+    ) -> tuple[str | int, list[dict[str, Any]]]:
         for block in child_blocks:
-            block_content = list(block.keys())[0]
-            if block_content == content:
-                return list(block.values())[0]
-        return None
+            if block.get("text") == content:
+                return block["uid"], block.get("children", [])
+
+        child_node = self.node_builder.instantiate_node(
+            kind,
+            parent_uid,
+            content,
+            None,
+            user_book_id,
+        )
+        self.target_re_nodes.append(child_node)
+        return child_node.uid, []
 
 
 class DNExportWriteback:
