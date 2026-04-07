@@ -425,14 +425,21 @@ class DNExporter:
     def export(self) -> DailyNoteExportResult:
         self._ensure_daily_note()
 
-        write_response = self._execute_batch_actions(self.hl_re_nodes)
-        resolve_actions(self.hl_re_nodes, write_response.get("tempids-to-uids", {}))
+        if self.hl_re_nodes:
+            roam_api_response = self._rc._write(batch_action_body(self.hl_re_nodes)) or {}
+            resolve_actions(
+                self.hl_re_nodes,
+                roam_api_response.get("tempids-to-uids", {}),
+            )
 
         self.target_re_nodes = self.link_re_nodes
         self._build_link_actions()
         if self.link_re_nodes:
-            write_response = self._execute_batch_actions(self.link_re_nodes)
-            resolve_actions(self.link_re_nodes, write_response.get("tempids-to-uids", {}))
+            roam_api_response = self._rc._write(batch_action_body(self.link_re_nodes)) or {}
+            resolve_actions(
+                self.link_re_nodes,
+                roam_api_response.get("tempids-to-uids", {}),
+            )
 
         return DailyNoteExportResult(
             target_date=self.target_date,
@@ -527,11 +534,6 @@ class DNExporter:
                 book.user_book_id,
             )
             self.target_re_nodes.append(book_link_node)
-
-    def _execute_batch_actions(self, nodes: list[RoamExportNode]) -> dict[str, Any]:
-        if not nodes:
-            return {}
-        return self._rc._write(batch_action_body(nodes)) or {}
 
     def _resolve_book_uid(self, user_book_id: int) -> str:
         existing_book = self.state.book_header_uids.get(user_book_id)
