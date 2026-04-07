@@ -48,7 +48,7 @@ def strip_markdown_links(s: str) -> str:
 
 
 @dataclass
-class HighlightFromDB:
+class HighlightFromDb:
     user_book_id: int
     id: int
     text: str
@@ -69,7 +69,7 @@ class HighlightFromDB:
 
 
 @dataclass
-class BookFromDB:
+class BookFromDb:
     user_book_id: int
     title: str
     author: str
@@ -79,7 +79,7 @@ class BookFromDB:
     category: str
     readwise_url: str
     source_url: str
-    highlights: list[HighlightFromDB] = field(default_factory=list)
+    highlights: list[HighlightFromDb] = field(default_factory=list)
 
     @property
     def roam_book_header(self) -> str:
@@ -142,7 +142,7 @@ class BookFromDB:
         return links
 
 
-class DBData:
+class DbData:
     """
     Build daily note payload:
     dict[date] -> list[DNBook]
@@ -151,9 +151,9 @@ class DBData:
     def __init__(self, batch_id: int) -> None:
         self.batch_id = batch_id
         self._session: Session = get_session(fetch_user_config().db_path)
-        self.grouped: dict[date, dict[int, BookFromDB]] = defaultdict(dict)
+        self.grouped: dict[date, dict[int, BookFromDb]] = defaultdict(dict)
 
-    def build(self) -> dict[date, list[BookFromDB]]:
+    def build(self) -> dict[date, list[BookFromDb]]:
         logger.info("Create payload for batch: %s", self.batch_id)
 
         rows = self._fetch()
@@ -199,7 +199,7 @@ class DBData:
         book_id = h.book.user_book_id
 
         if book_id not in self.grouped[date_key]:
-            self.grouped[date_key][book_id] = BookFromDB(
+            self.grouped[date_key][book_id] = BookFromDb(
                 user_book_id=book_id,
                 title=h.book.title,
                 author=h.book.author,
@@ -212,7 +212,7 @@ class DBData:
             )
 
         self.grouped[date_key][book_id].highlights.append(
-            HighlightFromDB(
+            HighlightFromDb(
                 user_book_id=book_id,
                 id=h.id,
                 text=h.text,
@@ -227,7 +227,7 @@ class DBData:
 
 
 @dataclass
-class ExistingDNState:
+class DbDNState:
     """
     Known state of a single daily note, sourced from db.
 
@@ -334,7 +334,7 @@ class DNExporter:
     def __init__(
         self,
         target_date: date,
-        books: list[BookFromDB],
+        books: list[BookFromDb],
         roam_client: RoamClient,
         session: Session,
     ) -> None:
@@ -480,7 +480,7 @@ class DNExporter:
             )
             self.target_re_nodes.append(book_link_node)
 
-    def _load_existing_state(self) -> ExistingDNState:
+    def _load_existing_state(self) -> DbDNState:
         page_uid = self._rc.date_to_roam_daily_note(self.target_date)
         tracked_page = self._session.get(RoamPage, page_uid)
         known_page = self._session.get(RoamKnownPage, page_uid)
@@ -495,7 +495,7 @@ class DNExporter:
             for row in self._session.query(RoamHighlightExport).filter_by(page_uid=page_uid)
         }
 
-        return ExistingDNState(
+        return DbDNState(
             page_uid=page_uid,
             page_exists=(known_page is not None or tracked_page is not None),
             rw_header_uid=(
@@ -746,7 +746,7 @@ class DNExportWriteback:
 
 
 def main() -> None:
-    dnhp = DBData(60)
+    dnhp = DbData(60)
     grouped_highlights = dnhp.build()
     rc = RoamClient()
     session: Session = get_session(fetch_user_config().db_path)
