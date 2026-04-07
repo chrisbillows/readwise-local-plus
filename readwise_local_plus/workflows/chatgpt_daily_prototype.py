@@ -305,8 +305,8 @@ class DNExporterPrototype:
 
     def __init__(self, grouped_highlights: dict[date, list[DNBook]]) -> None:
         self.grouped_highlights = grouped_highlights
-        self.uid_gen = TempUidGenerator()
-        self.rc = RoamClient()
+        self._uid_gen = TempUidGenerator()
+        self._rc = RoamClient()
         self._session: Session = get_session(fetch_user_config().db_path)
 
     def export(self) -> list[DailyNoteExportResult]:
@@ -328,27 +328,27 @@ class DNExporterPrototype:
         state = self._load_existing_state(target_date, books)
         self._ensure_daily_note(target_date, state)
 
-        content_actions = self._build_content_actions(state, books)
-        content_response = self._execute_batch_actions(content_actions)
-        content_actions.resolve(content_response.get("tempids-to-uids", {}))
+        batch_actions = self._build_content_actions(state, books)
+        write_response = self._execute_batch_actions(batch_actions)
+        batch_actions.resolve(write_response.get("tempids-to-uids", {}))
 
-        link_actions = self._build_link_actions(state, books, content_actions)
+        link_actions = self._build_link_actions(state, books, batch_actions)
         if link_actions.actions:
-            link_response = self._execute_batch_actions(link_actions)
-            link_actions.resolve(link_response.get("tempids-to-uids", {}))
+            write_response = self._execute_batch_actions(link_actions)
+            link_actions.resolve(write_response.get("tempids-to-uids", {}))
 
         return DailyNoteExportResult(
             target_date=target_date,
             page_uid=state.page_uid,
             tracked_header_uid=state.tracked_header_uid,
-            content_actions=content_actions,
+            content_actions=batch_actions,
             link_actions=link_actions,
         )
 
     def _load_existing_state(
         self, target_date: date, books: list[DNBook]
     ) -> ExistingDailyNoteState:
-        page_uid = self.rc.date_to_roam_daily_note(target_date)
+        page_uid = self._rc.date_to_roam_daily_note(target_date)
         tracked_page = self._session.get(RoamPage, page_uid)
         known_page = self._session.get(RoamKnownPage, page_uid)
 
@@ -394,9 +394,9 @@ class DNExporterPrototype:
         if state.known_page_exists or state.tracked_header_uid is not None:
             return
 
-        dn_long = self.rc._format_daily_note_title_long_format(target_date)
+        dn_long = self._rc._format_daily_note_title_long_format(target_date)
         try:
-            self.rc.create_page(dn_long, exists_ok=True)
+            self._rc.create_page(dn_long, exists_ok=True)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Failed to ensure daily note %s exists: %s", state.page_uid, exc)
 
@@ -481,7 +481,7 @@ class DNExporterPrototype:
         content_actions: RoamBatchActionList,
     ) -> RoamBatchActionList:
         actions = RoamBatchActionList()
-        child_blocks = self.rc.fetch_child_blocks(state.page_uid) or []
+        child_blocks = self._rc.fetch_child_blocks(state.page_uid) or []
         links_header_uid = self._find_existing_child_uid(child_blocks, READWISE_LINKS)
 
         if links_header_uid is None:
@@ -495,7 +495,7 @@ class DNExporterPrototype:
 
         existing_link_children: list[dict[str, str]] = []
         if not isinstance(links_header_uid, int):
-            existing_link_children = self.rc.fetch_child_blocks(links_header_uid) or []
+            existing_link_children = self._rc.fetch_child_blocks(links_header_uid) or []
 
         for book in books:
             book_uid = self._resolve_book_uid(
@@ -542,7 +542,7 @@ class DNExporterPrototype:
         is_primary_highlight: bool = False,
         heading: int | None = None,
     ) -> str | int:
-        uid = self.uid_gen.next()
+        uid = self._uid_gen.next()
         block: dict[str, Any] = {"string": content, "uid": uid}
         if heading is not None:
             block["heading"] = heading
@@ -617,7 +617,7 @@ class DNExporterPrototype:
     def _execute_batch_actions(self, actions: RoamBatchActionList) -> dict[str, Any]:
         if not actions.actions:
             return {}
-        return self.rc._write(actions.batch_action_body) or {}
+        return self._rc._write(actions.batch_action_body) or {}
 
     def _resolve_book_uid(
         self,
