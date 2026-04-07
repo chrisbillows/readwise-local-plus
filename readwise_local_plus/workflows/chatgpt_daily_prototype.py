@@ -400,6 +400,7 @@ class DNExporterPrototype:
             self._rc.create_page(dn_long, exists_ok=True)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Failed to ensure daily note %s exists: %s", state.page_uid, exc)
+            return
 
         self._session.add(
             RoamKnownPage(page_uid=state.page_uid, last_verified_at=datetime.now())
