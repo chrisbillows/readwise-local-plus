@@ -439,6 +439,7 @@ class DNExporter:
                     self.target_re_nodes.append(note_node)
 
     def _build_link_roam_export_nodes(self) -> None:
+        # Link Headers are not yet stored in Db. Fetch live page state.
         child_blocks = self._rc.fetch_child_blocks(self.state.page_uid) or []
         links_header_uid = self._find_existing_child_uid(child_blocks, READWISE_LINKS)
 
