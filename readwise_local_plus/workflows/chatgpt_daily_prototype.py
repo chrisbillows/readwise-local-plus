@@ -48,7 +48,7 @@ def strip_markdown_links(s: str) -> str:
 
 
 @dataclass
-class DNHighlight:
+class HighlightFromDB:
     user_book_id: int
     id: int
     text: str
@@ -69,7 +69,7 @@ class DNHighlight:
 
 
 @dataclass
-class DNBook:
+class BookFromDB:
     user_book_id: int
     title: str
     author: str
@@ -79,7 +79,7 @@ class DNBook:
     category: str
     readwise_url: str
     source_url: str
-    highlights: list[DNHighlight] = field(default_factory=list)
+    highlights: list[HighlightFromDB] = field(default_factory=list)
 
     @property
     def roam_book_header(self) -> str:
@@ -142,7 +142,7 @@ class DNBook:
         return links
 
 
-class DNHighlightsPayload:
+class DBData:
     """
     Build daily note payload:
     dict[date] -> list[DNBook]
@@ -151,9 +151,9 @@ class DNHighlightsPayload:
     def __init__(self, batch_id: int) -> None:
         self.batch_id = batch_id
         self._session: Session = get_session(fetch_user_config().db_path)
-        self.grouped: dict[date, dict[int, DNBook]] = defaultdict(dict)
+        self.grouped: dict[date, dict[int, BookFromDB]] = defaultdict(dict)
 
-    def build(self) -> dict[date, list[DNBook]]:
+    def build(self) -> dict[date, list[BookFromDB]]:
         logger.info("Create payload for batch: %s", self.batch_id)
 
         rows = self._fetch()
@@ -199,7 +199,7 @@ class DNHighlightsPayload:
         book_id = h.book.user_book_id
 
         if book_id not in self.grouped[date_key]:
-            self.grouped[date_key][book_id] = DNBook(
+            self.grouped[date_key][book_id] = BookFromDB(
                 user_book_id=book_id,
                 title=h.book.title,
                 author=h.book.author,
@@ -212,7 +212,7 @@ class DNHighlightsPayload:
             )
 
         self.grouped[date_key][book_id].highlights.append(
-            DNHighlight(
+            HighlightFromDB(
                 user_book_id=book_id,
                 id=h.id,
                 text=h.text,
@@ -346,11 +346,11 @@ class DailyNoteExportResult:
     link_nodes: list[RoamExportNode]
 
 
-class DNExporter:
+class DNExport:
     def __init__(
         self,
         target_date: date,
-        books: list[DNBook],
+        books: list[BookFromDB],
         roam_client: RoamClient,
         session: Session,
     ) -> None:
@@ -520,7 +520,7 @@ class DNExporter:
     def _render_highlight(
         self,
         parent_uid: str | int,
-        highlight: DNHighlight,
+        highlight: HighlightFromDB,
     ) -> HighlightRenderResult:
         node = self.node_builder.instantiate_node(
             "highlight",
@@ -780,7 +780,7 @@ class DNExportWriteback:
 
 
 def main() -> None:
-    dnhp = DNHighlightsPayload(60)
+    dnhp = DBData(60)
     grouped_highlights = dnhp.build()
     rc = RoamClient()
     session: Session = get_session(fetch_user_config().db_path)
@@ -789,7 +789,7 @@ def main() -> None:
     logger.info("Exporting...")
     for target_date, books in grouped_highlights.items():
         logger.info("To daily note: %s", target_date.isoformat())
-        dn_export = DNExporter(target_date, books, rc, session)
+        dn_export = DNExport(target_date, books, rc, session)
         dn_export.build_batch_actions()
         results.append(dn_export.export())
 
