@@ -664,31 +664,55 @@ class DNExportWriteback:
         self,
         hl_nodes: list[RoamExportNode],
     ) -> None:
+        highlight_trees: list[dict[str, Any]] = []
+
         for hl_node in hl_nodes:
             if hl_node.kind == "highlight":
-                snapshot_tree = self._build_highlight_snapshot_tree(hl_node, hl_nodes)
-                snapshot_version = self._get_next_highlight_snapshot_version(
-                    hl_node.highlight_id
-                )
-                self._session.add(
-                    RoamHighlightSnapshot(
-                        highlight_id=hl_node.highlight_id,
-                        block_tree=snapshot_tree,
-                        block_tree_hash=self.stable_hash(snapshot_tree),
-                        version=snapshot_version,
-                        created_at=datetime.now(),
-                        export_batch=self._export_batch,
-                    )
+                highlight_trees.append(
+                    {
+                        "highlight_id": hl_node.highlight_id,
+                        "uid": hl_node.resolved_uid,
+                        "text": hl_node.body["block"]["string"],
+                        "order": None,
+                        "children": [],
+                    }
                 )
 
-    def _get_next_highlight_snapshot_version(self, highlight_id: int) -> int:
-        latest_snapshot = (
-            self._session.query(RoamHighlightSnapshot)
-            .filter_by(highlight_id=highlight_id)
-            .order_by(RoamHighlightSnapshot.version.desc())
-            .first()
-        )
-        return (latest_snapshot.version + 1) if latest_snapshot is not None else 1
+        for tree in highlight_trees:
+            for hl_node in hl_nodes:
+                if (
+                    hl_node.kind == "note"
+                    and hl_node.resolved_parent_uid == tree["uid"]
+                ):
+                    tree["children"].append(
+                        {
+                            "uid": hl_node.resolved_uid,
+                            "text": hl_node.body["block"]["string"],
+                            "order": None,
+                            "children": [],
+                        }
+                    )
+
+        for tree in highlight_trees:
+            latest_snapshot = (
+                self._session.query(RoamHighlightSnapshot)
+                .filter_by(highlight_id=tree["highlight_id"])
+                .order_by(RoamHighlightSnapshot.version.desc())
+                .first()
+            )
+            snapshot_version = (
+                latest_snapshot.version + 1 if latest_snapshot is not None else 1
+            )
+            self._session.add(
+                RoamHighlightSnapshot(
+                    highlight_id=tree["highlight_id"],
+                    block_tree=tree,
+                    block_tree_hash=self.stable_hash(tree),
+                    version=snapshot_version,
+                    created_at=datetime.now(),
+                    export_batch=self._export_batch,
+                )
+            )
 
     def _create_page_snapshot(
         self,
@@ -707,43 +731,6 @@ class DNExportWriteback:
                 export_batch=self._export_batch,
             )
         )
-
-    def _build_highlight_snapshot_tree(
-        self,
-        highlight_node: RoamExportNode,
-        nodes: list[RoamExportNode],
-    ) -> dict[str, Any]:
-        child_nodes = [
-            node
-            for node in nodes
-            if (
-                node.resolved_parent_uid == highlight_node.resolved_uid
-                and node.highlight_id == highlight_node.highlight_id
-            )
-        ]
-        children = [self._build_snapshot_tree(child_node, nodes) for child_node in child_nodes]
-        return {
-            "uid": highlight_node.resolved_uid,
-            "text": highlight_node.body["block"]["string"],
-            "order": None,
-            "children": children,
-        }
-
-    def _build_snapshot_tree(
-        self,
-        node: RoamExportNode,
-        nodes: list[RoamExportNode],
-    ) -> dict[str, Any]:
-        child_nodes = [
-            child for child in nodes if child.resolved_parent_uid == node.resolved_uid
-        ]
-        children = [self._build_snapshot_tree(child_node, nodes) for child_node in child_nodes]
-        return {
-            "uid": node.resolved_uid,
-            "text": node.body["block"]["string"],
-            "order": None,
-            "children": children,
-        }
 
     @staticmethod
     def stable_hash(obj: dict[str, Any]) -> str:
