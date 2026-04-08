@@ -264,7 +264,6 @@ class RoamExportNode:
     page_uid: str
     user_book_id: int | None = None
     highlight_id: int | None = None
-    is_primary_highlight: bool = False
     resolved_uid: str | None = None
     export_date: datetime = field(default_factory=datetime.now)
 
@@ -291,7 +290,6 @@ class RoamExportNodeBuilder:
         heading: int | None = None,
         user_book_id: int | None = None,
         highlight_id: int | None = None,
-        is_primary_highlight: bool = False,
     ) -> RoamExportNode:
         uid = self._uid_gen.next()
         block: dict[str, Any] = {"string": content, "uid": uid}
@@ -310,7 +308,6 @@ class RoamExportNodeBuilder:
             page_uid=self.page_uid,
             user_book_id=user_book_id,
             highlight_id=highlight_id,
-            is_primary_highlight=is_primary_highlight,
         )
 
 
@@ -424,7 +421,6 @@ class DNExporter:
                     None,
                     hl.user_book_id,
                     hl.id,
-                    True,
                 )
                 self.target_re_nodes.append(highlight_node)
 
@@ -642,7 +638,6 @@ class DNExportWriteback:
             elif (
                 action.kind == "highlight"
                 and action.highlight_id is not None
-                and action.is_primary_highlight
             ):
                 self._session.add(
                     RoamHighlightExport(
@@ -654,26 +649,26 @@ class DNExportWriteback:
                     )
                 )
 
-def _insert_roam_highlight_snapshots(
-    self,
-    hl_nodes: list[RoamExportNode],
-) -> None:
-    for hl_node in hl_nodes:
-        if hl_node.is_primary_highlight:
-            snapshot_tree = self._build_highlight_snapshot_tree(hl_node, hl_nodes)
-            snapshot_version = self._get_next_highlight_snapshot_version(
-                hl_node.highlight_id
-            )
-            self._session.add(
-                RoamHighlightSnapshot(
-                    highlight_id=hl_node.highlight_id,
-                    block_tree=snapshot_tree,
-                    block_tree_hash=self.stable_hash(snapshot_tree),
-                    version=snapshot_version,
-                    created_at=datetime.now(),
-                    export_batch=self._export_batch,
+    def _insert_roam_highlight_snapshots(
+        self,
+        hl_nodes: list[RoamExportNode],
+    ) -> None:
+        for hl_node in hl_nodes:
+            if hl_node.kind == "highlight":
+                snapshot_tree = self._build_highlight_snapshot_tree(hl_node, hl_nodes)
+                snapshot_version = self._get_next_highlight_snapshot_version(
+                    hl_node.highlight_id
                 )
-            )
+                self._session.add(
+                    RoamHighlightSnapshot(
+                        highlight_id=hl_node.highlight_id,
+                        block_tree=snapshot_tree,
+                        block_tree_hash=self.stable_hash(snapshot_tree),
+                        version=snapshot_version,
+                        created_at=datetime.now(),
+                        export_batch=self._export_batch,
+                    )
+                )
 
     def _get_next_highlight_snapshot_version(self, highlight_id: int) -> int:
         latest_snapshot = (
