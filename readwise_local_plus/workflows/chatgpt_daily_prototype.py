@@ -321,16 +321,6 @@ class RoamExportNodeBuilder:
             highlight_id=highlight_id,
         )
 
-
-@dataclass
-class DNExportResult:
-    target_date: date
-    page_uid: str
-    rw_header_uid: str | None
-    hl_nodes: list[RoamExportNode]
-    link_nodes: list[RoamExportNode]
-
-
 class DNExporter:
     def __init__(
         self,
@@ -349,7 +339,7 @@ class DNExporter:
         self.link_re_nodes: list[RoamExportNode] = []
         self.target_re_nodes: list[RoamExportNode] | None = None
 
-    def export(self) -> DNExportResult:
+    def export(self) -> tuple[list[RoamExportNode], list[RoamExportNode]]:
         self._ensure_daily_note()
 
         self.target_re_nodes = self.hl_re_nodes
@@ -374,13 +364,7 @@ class DNExporter:
         for re_node in self.link_re_nodes:
             re_node.resolve(tempid_map)
 
-        return DNExportResult(
-            target_date=self.target_date,
-            page_uid=self.state.page_uid,
-            rw_header_uid=self.state.rw_header_uid,
-            hl_nodes=self.hl_re_nodes,
-            link_nodes=self.link_re_nodes,
-        )
+        return self.hl_re_nodes, self.link_re_nodes
     
     def _build_hl_roam_export_nodes(self) -> None:
         if self.state.rw_header_uid is not None:
@@ -563,35 +547,36 @@ class DNExportWriteback:
 
     def persist_many(
         self,
-        dn_exports: list[DNExportResult],
+        hl_node_lists: list[list[RoamExportNode]],
     ) -> None:
         self._export_batch = RoamExportBatch(database_write_time=datetime.now())
         self._session.add(self._export_batch)
-        for dn_export in dn_exports:
-            self._persist_dn_export(dn_export)
+        for hl_nodes in hl_node_lists:
+            self._persist_hl_nodes(hl_nodes)
         self._session.commit()
         self._session.close()
 
-    def _persist_dn_export(
+    def _persist_hl_nodes(
         self,
-        dn_export: DNExportResult,
+        hl_nodes: list[RoamExportNode],
     ) -> None:
-        page = self._upsert_roam_page(dn_export)
-        self._insert_roam_book_exports_and_roam_highlight_exports(dn_export.hl_nodes)
-        self._insert_roam_highlight_snapshots(dn_export.hl_nodes)
+        page = self._upsert_roam_page(hl_nodes)
+        self._insert_roam_book_exports_and_roam_highlight_exports(hl_nodes)
+        self._insert_roam_highlight_snapshots(hl_nodes)
         self._create_page_snapshot(
-            page_uid=dn_export.page_uid,
+            page_uid=page.page_uid,
             header_uid=page.highlights_header_uid,
             page=page,
         )
 
     def _upsert_roam_page(
         self,
-        dn_export: DNExportResult,
+        hl_nodes: list[RoamExportNode],
     ) -> RoamPage:
-        existing_page = self._session.get(RoamPage, dn_export.page_uid)
+        page_uid = hl_nodes[0].page_uid
+        existing_page = self._session.get(RoamPage, page_uid)
         new_rwh_node = None
-        for hl_node in dn_export.hl_nodes:
+        for hl_node in hl_nodes:
             if hl_node.kind == "readwise_header":
                 new_rwh_node = hl_node
                 break
@@ -617,10 +602,10 @@ class DNExportWriteback:
             return existing_page
 
         if new_rwh_node is None:
-            raise ValueError(f"No readwise header node found for {dn_export.page_uid}")
+            raise ValueError(f"No readwise header node found for {page_uid}")
 
         page = RoamPage(
-            page_uid=dn_export.page_uid,
+            page_uid=page_uid,
             highlights_header_uid=new_rwh_node.resolved_uid,
             highlights_header_text=new_rwh_node.body["block"]["string"],
             export_batch=self._export_batch,
@@ -741,17 +726,21 @@ def main() -> None:
     grouped_highlights = dnhp.build()
     rc = RoamClient()
     session: Session = get_session(fetch_user_config().db_path)
-    dn_exports: list[DNExportResult] = []
+    hl_node_lists: list[list[RoamExportNode]] = []
 
     logger.info("Exporting...")
     for target_date, books in grouped_highlights.items():
         logger.info("To daily note: %s", target_date.isoformat())
         dn_export = DNExporter(target_date, books, rc, session)
-        dn_exports.append(dn_export.export())
+        hl_nodes, link_nodes = dn_export.export()
+        hl_node_lists.append(hl_nodes)
+    
+        # NOTE: Link nodes not currently persisted to sqlite.
+        _ = link_nodes
 
     session.close()
     writeback = DNExportWriteback(rc)
-    writeback.persist_many(dn_exports)
+    writeback.persist_many(hl_node_lists)
 
 
 if __name__ == "__main__":
