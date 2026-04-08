@@ -265,6 +265,7 @@ class RoamExportNode:
     user_book_id: int | None = None
     highlight_id: int | None = None
     resolved_uid: str | None = None
+    resolved_parent_uid: str | None = None
     export_date: datetime = field(default_factory=datetime.now)
 
     def resolve(self, tempid_map: dict[str, str]) -> None:
@@ -275,6 +276,16 @@ class RoamExportNode:
             self.resolved_uid = resolved
         else:
             self.resolved_uid = self.uid
+
+        if isinstance(self.parent_uid, int):
+            resolved_parent = tempid_map.get(str(self.parent_uid))
+            if resolved_parent is None:
+                raise ValueError(
+                    f"Temp parent UID {self.parent_uid} missing from Roam response"
+                )
+            self.resolved_parent_uid = resolved_parent
+        else:
+            self.resolved_parent_uid = self.parent_uid
 
 
 class RoamExportNodeBuilder:
@@ -705,7 +716,10 @@ class DNExportWriteback:
         child_nodes = [
             node
             for node in nodes
-            if node.parent_uid == highlight_node.uid and node.highlight_id == highlight_node.highlight_id
+            if (
+                node.resolved_parent_uid == highlight_node.resolved_uid
+                and node.highlight_id == highlight_node.highlight_id
+            )
         ]
         children = [self._build_snapshot_tree(child_node, nodes) for child_node in child_nodes]
         return {
@@ -720,7 +734,9 @@ class DNExportWriteback:
         node: RoamExportNode,
         nodes: list[RoamExportNode],
     ) -> dict[str, Any]:
-        child_nodes = [child for child in nodes if child.parent_uid == node.uid]
+        child_nodes = [
+            child for child in nodes if child.resolved_parent_uid == node.resolved_uid
+        ]
         children = [self._build_snapshot_tree(child_node, nodes) for child_node in child_nodes]
         return {
             "uid": node.resolved_uid,
