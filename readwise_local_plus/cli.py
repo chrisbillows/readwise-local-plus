@@ -99,6 +99,12 @@ def setup_sync_subparser(subparsers: "SubParsersAction") -> None:
         action="store_true",
         help="Run a full sync. E.g. Fetch or refetch all highlights.",
     )
+    group.add_argument(
+        "--batch-id",
+        type=int,
+        metavar="BATCH_ID",
+        help="Skip Readwise fetch and write an existing Readwise batch to Roam.",
+    )
 
 
 def setup_parser() -> argparse.ArgumentParser:
@@ -151,7 +157,11 @@ def main(user_config: Optional[UserConfig] = None) -> None:
     args = parse_args()
 
     if args.command == "sync":
-        if args.all:
+        if args.batch_id is not None:
+            logger.info("Writing existing Readwise batch %s to Roam.", args.batch_id)
+            rdw = RoamDailyNoteHighlightWriter(args.batch_id)
+            rdw.write_batch_to_daily_notes()
+        elif args.all:
             logger.info("Running full sync (--all).")
             run_pipeline_flattened_objects(user_config, last_fetch=None)
         else:
