@@ -721,27 +721,24 @@ class DNExportWriteback:
             json.dumps(obj, sort_keys=True).encode("utf-8")
         ).hexdigest()
 
-def main() -> None:
-    dnhp = DbData(60)
-    grouped_highlights = dnhp.build()
+
+def write_batch_to_daily_notes(batch_id: int) -> None:
+    db_data = DbData(batch_id)
+    grouped_highlights = db_data.build()
     rc = RoamClient()
     session: Session = get_session(fetch_user_config().db_path)
     hl_node_lists: list[list[RoamExportNode]] = []
 
-    logger.info("Exporting...")
+    logger.info("Exporting batch %s to Roam daily notes", batch_id)
     for target_date, books in grouped_highlights.items():
         logger.info("To daily note: %s", target_date.isoformat())
         dn_export = DNExporter(target_date, books, rc, session)
         hl_nodes, link_nodes = dn_export.export()
         hl_node_lists.append(hl_nodes)
     
-        # NOTE: Link nodes not currently persisted to sqlite.
+        # Link nodes not currently persisted to sqlite.
         _ = link_nodes
 
     session.close()
     writeback = DNExportWriteback(rc)
     writeback.persist_many(hl_node_lists)
-
-
-if __name__ == "__main__":
-    main()
