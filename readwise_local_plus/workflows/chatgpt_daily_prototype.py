@@ -654,18 +654,12 @@ class DNExportWriteback:
                     )
                 )
 
-    def _insert_roam_highlight_snapshots(
-        self,
-        hl_nodes: list[RoamExportNode],
-    ) -> None:
-        for hl_node in hl_nodes:
-            if (
-                hl_node.kind != "highlight"
-                or hl_node.highlight_id is None
-                or not hl_node.is_primary_highlight
-            ):
-                continue
-
+def _insert_roam_highlight_snapshots(
+    self,
+    hl_nodes: list[RoamExportNode],
+) -> None:
+    for hl_node in hl_nodes:
+        if hl_node.is_primary_highlight:
             snapshot_tree = self._build_highlight_snapshot_tree(hl_node, hl_nodes)
             snapshot_version = self._get_next_highlight_snapshot_version(
                 hl_node.highlight_id
