@@ -709,7 +709,7 @@ class DNExportWriteback:
         ]
         children = [self._build_snapshot_tree(child_node, nodes) for child_node in child_nodes]
         return {
-            "uid": self._resolve_uid_from_actions(highlight_node.uid, nodes),
+            "uid": highlight_node.resolved_uid,
             "text": highlight_node.body["block"]["string"],
             "order": None,
             "children": children,
@@ -723,7 +723,7 @@ class DNExportWriteback:
         child_nodes = [child for child in nodes if child.parent_uid == node.uid]
         children = [self._build_snapshot_tree(child_node, nodes) for child_node in child_nodes]
         return {
-            "uid": self._resolve_uid_from_actions(node.uid, nodes),
+            "uid": node.resolved_uid,
             "text": node.body["block"]["string"],
             "order": None,
             "children": children,
@@ -734,22 +734,6 @@ class DNExportWriteback:
         return hashlib.sha256(
             json.dumps(obj, sort_keys=True).encode("utf-8")
         ).hexdigest()
-
-    @staticmethod
-    def _resolve_uid_from_actions(
-        uid: str | int, nodes: list[RoamExportNode]
-    ) -> str:
-        if isinstance(uid, str):
-            return uid
-
-        for node in nodes:
-            if node.uid == uid:
-                if node.resolved_uid is None:
-                    raise ValueError(f"UID {uid} was not resolved")
-                return node.resolved_uid
-
-        raise ValueError(f"UID {uid} not found in action list")
-
 
 def main() -> None:
     dnhp = DbData(60)
