@@ -469,7 +469,7 @@ class DNExporter:
 
     def _load_existing_state(self) -> DbDNState:
         page_uid = self._rc.date_to_roam_daily_note(self.target_date)
-        tracked_page = self._session.get(RoamPage, page_uid)
+        existing_page = self._session.get(RoamPage, page_uid)
         known_page = self._session.get(RoamKnownPage, page_uid)
 
         existing_book_header_uids = {
@@ -484,9 +484,9 @@ class DNExporter:
 
         return DbDNState(
             page_uid=page_uid,
-            page_exists=(known_page is not None or tracked_page is not None),
+            page_exists=(known_page is not None or existing_page is not None),
             rw_header_uid=(
-                tracked_page.highlights_header_uid if tracked_page is not None else None
+                existing_page.highlights_header_uid if existing_page is not None else None
             ),
             book_header_uids=existing_book_header_uids,
             highlight_ids=highlight_ids,
@@ -554,73 +554,80 @@ class DNExportWriteback:
     def __init__(self, roam_client: RoamClient) -> None:
         self._session: Session = get_session(fetch_user_config().db_path)
         self._roam_client = roam_client
-
-    def persist(
-        self,
-        result: DNExportResult,
-        export_batch: RoamExportBatch,
-    ) -> None:
-        page = self._upsert_page_row(result, export_batch)
-        self._persist_content_rows(result.hl_nodes, export_batch)
-        self._create_page_snapshot(
-            page_uid=result.page_uid,
-            header_uid=page.highlights_header_uid,
-            page=page,
-            export_batch=export_batch,
-        )
+        self._export_batch: RoamExportBatch | None = None
 
     def persist_many(
         self,
-        results: list[DNExportResult],
+        dn_exports: list[DNExportResult],
     ) -> None:
-        export_batch = RoamExportBatch(database_write_time=datetime.now())
-        self._session.add(export_batch)
-        for result in results:
-            self.persist(result, export_batch)
+        self._export_batch = RoamExportBatch(database_write_time=datetime.now())
+        self._session.add(self._export_batch)
+        for dn_export in dn_exports:
+            self._persist_dn_export(dn_export)
         self._session.commit()
         self._session.close()
 
-    def _upsert_page_row(
+    def _persist_dn_export(
         self,
-        result: DNExportResult,
-        export_batch: RoamExportBatch,
-    ) -> RoamPage:
-        tracked_page = self._session.get(RoamPage, result.page_uid)
-        header_action = next(
-            (
-                action
-                for action in result.hl_nodes
-                if action.kind == "readwise_header"
-            ),
-            None,
-        )
-        header_uid = (
-            header_action.resolved_uid
-            if header_action is not None
-            else result.rw_header_uid
-        )
-
-        if tracked_page is None:
-            page = RoamPage(
-                page_uid=result.page_uid,
-                highlights_header_uid=header_uid,
-                highlights_header_text=READWISE_HEADER,
-                export_batch=export_batch,
-            )
-            self._session.add(page)
-            return page
-
-        tracked_page.highlights_header_uid = header_uid
-        tracked_page.highlights_header_text = READWISE_HEADER
-        tracked_page.export_batch = export_batch
-        return tracked_page
-
-    def _persist_content_rows(
-        self,
-        content_nodes: list[RoamExportNode],
-        export_batch: RoamExportBatch,
+        dn_export: DNExportResult,
     ) -> None:
-        for action in content_nodes:
+        page = self._upsert_roam_page(dn_export)
+        self._insert_roam_book_exports_and_roam_highlight_exports(dn_export.hl_nodes)
+        self._insert_roam_highlight_snapshots(dn_export.hl_nodes)
+        self._create_page_snapshot(
+            page_uid=dn_export.page_uid,
+            header_uid=page.highlights_header_uid,
+            page=page,
+        )
+
+    def _upsert_roam_page(
+        self,
+        dn_export: DNExportResult,
+    ) -> RoamPage:
+        existing_page = self._session.get(RoamPage, dn_export.page_uid)
+        new_rwh_node = None
+        for hl_node in dn_export.hl_nodes:
+            if hl_node.kind == "readwise_header":
+                new_rwh_node = hl_node
+                break
+
+        if existing_page:
+            if new_rwh_node is None:
+                return existing_page
+
+            rwh_uid_unchanged = (
+                existing_page.highlights_header_uid == new_rwh_node.resolved_uid
+            )
+            rwh_text_unchanged = (
+                existing_page.highlights_header_text
+                == new_rwh_node.body["block"]["string"]
+            )
+
+            if rwh_uid_unchanged and rwh_text_unchanged:
+                return existing_page
+
+            existing_page.highlights_header_uid = new_rwh_node.resolved_uid
+            existing_page.highlights_header_text = new_rwh_node.body["block"]["string"]
+            existing_page.export_batch = self._export_batch
+            return existing_page
+
+        if new_rwh_node is None:
+            raise ValueError(f"No readwise header node found for {dn_export.page_uid}")
+
+        page = RoamPage(
+            page_uid=dn_export.page_uid,
+            highlights_header_uid=new_rwh_node.resolved_uid,
+            highlights_header_text=new_rwh_node.body["block"]["string"],
+            export_batch=self._export_batch,
+        )
+        self._session.add(page)
+        return page
+
+    def _insert_roam_book_exports_and_roam_highlight_exports(
+        self,
+        hl_nodes: list[RoamExportNode],
+    ) -> None:
+        for action in hl_nodes:
             if action.kind == "book_header" and action.user_book_id is not None:
                 self._session.add(
                     RoamBookExport(
@@ -628,7 +635,7 @@ class DNExportWriteback:
                         page_uid=action.page_uid,
                         parent_block_uid=action.resolved_uid,
                         export_date=action.export_date,
-                        export_batch=export_batch,
+                        export_batch=self._export_batch,
                     )
                 )
 
@@ -643,24 +650,36 @@ class DNExportWriteback:
                         page_uid=action.page_uid,
                         block_uid=action.resolved_uid,
                         export_date=action.export_date,
-                        export_batch=export_batch,
+                        export_batch=self._export_batch,
                     )
                 )
 
-                snapshot_tree = self._build_highlight_snapshot_tree(action, content_nodes)
-                snapshot_version = self._get_next_highlight_snapshot_version(
-                    action.highlight_id
+    def _insert_roam_highlight_snapshots(
+        self,
+        hl_nodes: list[RoamExportNode],
+    ) -> None:
+        for hl_node in hl_nodes:
+            if (
+                hl_node.kind != "highlight"
+                or hl_node.highlight_id is None
+                or not hl_node.is_primary_highlight
+            ):
+                continue
+
+            snapshot_tree = self._build_highlight_snapshot_tree(hl_node, hl_nodes)
+            snapshot_version = self._get_next_highlight_snapshot_version(
+                hl_node.highlight_id
+            )
+            self._session.add(
+                RoamHighlightSnapshot(
+                    highlight_id=hl_node.highlight_id,
+                    block_tree=snapshot_tree,
+                    block_tree_hash=self.stable_hash(snapshot_tree),
+                    version=snapshot_version,
+                    created_at=datetime.now(),
+                    export_batch=self._export_batch,
                 )
-                self._session.add(
-                    RoamHighlightSnapshot(
-                        highlight_id=action.highlight_id,
-                        block_tree=snapshot_tree,
-                        block_tree_hash=self.stable_hash(snapshot_tree),
-                        version=snapshot_version,
-                        created_at=datetime.now(),
-                        export_batch=export_batch,
-                    )
-                )
+            )
 
     def _get_next_highlight_snapshot_version(self, highlight_id: int) -> int:
         latest_snapshot = (
@@ -676,7 +695,6 @@ class DNExportWriteback:
         page_uid: str,
         header_uid: str,
         page: RoamPage,
-        export_batch: RoamExportBatch,
     ) -> None:
         block_tree = self._roam_client.fetch_block_subtree(header_uid)
         self._session.add(
@@ -686,7 +704,7 @@ class DNExportWriteback:
                 block_tree_hash=self.stable_hash(block_tree),
                 version=len(page.snapshots) + 1,
                 version_date=datetime.now(),
-                export_batch=export_batch,
+                export_batch=self._export_batch,
             )
         )
 
@@ -749,17 +767,17 @@ def main() -> None:
     grouped_highlights = dnhp.build()
     rc = RoamClient()
     session: Session = get_session(fetch_user_config().db_path)
-    results: list[DNExportResult] = []
+    dn_exports: list[DNExportResult] = []
 
     logger.info("Exporting...")
     for target_date, books in grouped_highlights.items():
         logger.info("To daily note: %s", target_date.isoformat())
         dn_export = DNExporter(target_date, books, rc, session)
-        results.append(dn_export.export())
+        dn_exports.append(dn_export.export())
 
     session.close()
     writeback = DNExportWriteback(rc)
-    writeback.persist_many(results)
+    writeback.persist_many(dn_exports)
 
 
 if __name__ == "__main__":
