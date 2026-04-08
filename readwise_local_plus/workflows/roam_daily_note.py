@@ -152,7 +152,6 @@ class RoamDailyNoteHighlightWriter:
         self._write_highlights()
         self._session.close()
 
-    # write_batch_to_daily_notes
     def fetch_highlights(self) -> None:
         """
         Fetch highlights for a batch, filtered for tweets & articles, grouped by
@@ -192,7 +191,116 @@ class RoamDailyNoteHighlightWriter:
             )
             self.highlights[target_date][book] = hls
 
-    # write_batch_to_daily_notes
+    def create_formatted_book_header_by_category(self, book: Book) -> str:
+        """
+        Create a header block for a book highlight.
+
+        Parameters
+        ----------
+        book : Book
+            The book for which to create the header.
+
+        Returns
+        -------
+        str
+            Formatted header string for the book.
+        """
+        if not book.title:
+            return "[ERROR]: Missing title"
+
+        # Tweets and tweet threads.
+        if book.category == "tweets":
+            if not book.title.lower().startswith("tweets from"):
+                if book.author.startswith("@"):
+                    author = book.author.split(" ")[0][1:] if book.author else "unknown"
+                else:
+                    author = book.author.title()
+                title = f"Tweet Thread From {author}"
+            else:
+                title = book.title
+            return f"{title} #[[tweets]] #[[rw]] [↗️]({book.source_url or 'n/a'})"
+
+        if book.category == "articles":
+            author = book.author.title() if book.author else "unknown"
+            title = book.title + f" #[[{author}]]"
+            if isinstance(book.source_url, str):
+                try:
+                    domain = extract(book.source_url).top_domain_under_public_suffix
+                    if domain:
+                        title += f" #{domain.lower()}"
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug(
+                        "Failed to extract domain from %s: %s",
+                        book.source_url,
+                        exc,
+                    )
+            return title + f" #[[articles]] #[[rw]] [↗️]({book.source_url or 'n/a'})"
+
+        # Fallback for other categories (if any).
+        return book.title
+
+    def create_formatted_highlight_by_category(
+        self, highlight: Highlight
+    ) -> HighlightBlockPlan:
+        """Return a block plan representing the highlight.
+
+        Parameters
+        ----------
+        highlight : Highlight
+            The highlight to format.
+
+        Returns
+        -------
+        HighlightBlockPlan
+            Block plan describing how to render the highlight.
+        """
+        book = getattr(highlight, "book", None)
+        if book is None or getattr(book, "category", None) is None:
+            raise ValueError("Invalid highlight object")
+
+        text = getattr(highlight, "text", None)
+
+        if text:
+            text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+            text = text.replace("\n", " ")
+            text = f"{text}"
+        else:
+            text = "[ERROR]: Missing highlight text"
+
+        if book and getattr(book, "category", None) == "tweets":
+            text += f"[↗️]({highlight.url or 'n/a'})"
+            url = getattr(highlight, "url", None)
+
+            # text_block = HighlightBlockSpec(text=text, is_primary=True)
+
+            # if url:
+            #     root = HighlightBlockSpec(text=url, children=[text_block])
+            #     return HighlightBlockPlan(root=root)
+
+            # return HighlightBlockPlan(root=text_block)
+
+        return HighlightBlockPlan(root=HighlightBlockSpec(text=text, is_primary=True))
+
+    @staticmethod
+    def stable_hash(obj: dict[str, Any]) -> str:
+        """
+        Return a stable SHA256 hash for a JSON-serializable object.
+
+        Parameters
+        ----------
+        obj : dict[str, Any]
+            JSON-serializable object to hash.
+
+        Returns
+        -------
+        str
+            Hexadecimal SHA256 hash of the object.
+        """
+        # sort_keys=True ensures deterministic ordering
+        return hashlib.sha256(
+            json.dumps(obj, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
     def _write_highlights(self) -> None:
         """
         Write fetched highlights to Roam daily notes.
@@ -211,13 +319,12 @@ class RoamDailyNoteHighlightWriter:
 
         self._session.commit()
 
-    # _write_highlights
     def _process_daily_note(
         self,
         daily_note: date,
         books_and_highlights: dict[Book, list[Highlight]],
         export_batch: RoamExportBatch,
-        ) -> None:
+    ) -> None:
         """Process highlights for a single daily note page.
 
         Parameters
@@ -267,6 +374,7 @@ class RoamDailyNoteHighlightWriter:
             books_and_highlights,
             roam_batch_action,
         )
+
         tempid_map = self._execute_batch_action(roam_batch_action)
         header_uid = self._resolve_uid(tempid_map, header_uid_candidate)
 
@@ -289,29 +397,13 @@ class RoamDailyNoteHighlightWriter:
 
         self._create_page_snapshot(daily_note_uid, header_uid, page, export_batch)
 
-    # _process_daily_note
-    def _record_page_seen(self, page_uid: str) -> None:
-        """
-        Record that a page has been seen in the RoamKnownPage table.
-
-        Parameters
-        ----------
-        page_uid : str
-            UID of the page that has been seen.
-
-        """
-        now = datetime.now()
-        self._session.add(RoamKnownPage(page_uid=page_uid, last_verified_at=now))
-        self._session.flush()
-
-    # _process_daily_note
     def _process_books_and_highlights(
         self,
         daily_note_uid: str,
         header_uid_candidate: str | int,
         books_and_highlights: dict[Book, list[Highlight]],
         roam_batch_action: RoamBatchAction,
-        ) -> StagedExports:
+    ) -> StagedExports:
         """Gather pending export artifacts for the supplied highlights.
 
         Parameters
@@ -347,8 +439,7 @@ class RoamDailyNoteHighlightWriter:
             )
 
         return pending
-    
-    # _process_books_and_highlights
+
     def _process_book(
         self,
         daily_note_uid: str,
@@ -406,81 +497,6 @@ class RoamDailyNoteHighlightWriter:
                 pending,
             )
 
-    # _process_book
-    def _get_existing_book_export(
-        self, daily_note_uid: str, user_book_id: int
-    ) -> RoamBookExport | None:
-        """
-        Fetch an existing book export for the specified page and book.
-
-        Parameters
-        ----------
-        daily_note_uid : str
-            UID of the daily note page.
-        user_book_id : int
-            Identifier of the book.
-
-        Returns
-        -------
-        RoamBookExport | None
-            Existing export record if present, otherwise `None`.
-        """
-        return (
-            self._session.query(RoamBookExport)
-            .filter_by(user_book_id=user_book_id, page_uid=daily_note_uid)
-            .first()
-        )
-
-    # process_book
-    def create_formatted_book_header_by_category(self, book: Book) -> str:
-        """
-        Create a header block for a book highlight.
-
-        Parameters
-        ----------
-        book : Book
-            The book for which to create the header.
-
-        Returns
-        -------
-        str
-            Formatted header string for the book.
-        """
-        if not book.title:
-            return "[ERROR]: Missing title"
-
-        # Tweets and tweet threads.
-        if book.category == "tweets":
-            if not book.title.lower().startswith("tweets from"):
-                if book.author.startswith("@"):
-                    author = book.author.split(" ")[0][1:] if book.author else "unknown"
-                else:
-                    author = book.author.title()
-                title = f"Tweet Thread From {author}"
-            else:
-                title = book.title
-            return f"{title} #[[tweets]] #[[rw]] [↗️]({book.source_url or 'n/a'})"
-
-        if book.category == "articles":
-            author = book.author.title() if book.author else "unknown"
-            title = book.title + f" #[[{author}]]"
-            if isinstance(book.source_url, str):
-                try:
-                    domain = extract(book.source_url).top_domain_under_public_suffix
-                    if domain:
-                        title += f" #{domain.lower()}"
-                except Exception as exc:  # pragma: no cover - defensive
-                    logger.debug(
-                        "Failed to extract domain from %s: %s",
-                        book.source_url,
-                        exc,
-                    )
-            return title + f" #[[articles]] #[[rw]] [↗️]({book.source_url or 'n/a'})"
-
-        # Fallback for other categories (if any).
-        return book.title
-    
-    # process_book
     def _process_highlight(
         self,
         daily_note_uid: str,
@@ -539,75 +555,6 @@ class RoamDailyNoteHighlightWriter:
             )
         )
 
-    # process_highlight
-    def _get_existing_highlight_export(
-        self, daily_note_uid: str, highlight_id: int
-    ) -> RoamHighlightExport | None:
-        """
-        Fetch an existing highlight export for the specified page and highlight.
-
-        Parameters
-        ----------
-        daily_note_uid : str
-            UID of the daily note page.
-        highlight_id : int
-            Identifier of the highlight.
-
-        Returns
-        -------
-        RoamHighlightExport | None
-            Existing export record if present, otherwise `None`.
-        """
-        return (
-            self._session.query(RoamHighlightExport)
-            .filter_by(highlight_id=highlight_id, page_uid=daily_note_uid)
-            .first()
-        )
-
-    # process_highlight
-    def create_formatted_highlight_by_category(
-        self, highlight: Highlight
-    ) -> HighlightBlockPlan:
-        """Return a block plan representing the highlight.
-
-        Parameters
-        ----------
-        highlight : Highlight
-            The highlight to format.
-
-        Returns
-        -------
-        HighlightBlockPlan
-            Block plan describing how to render the highlight.
-        """
-        book = getattr(highlight, "book", None)
-        if book is None or getattr(book, "category", None) is None:
-            raise ValueError("Invalid highlight object")
-
-        text = getattr(highlight, "text", None)
-
-        if text:
-            text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-            text = text.replace("\n", " ")
-            text = f"{text}"
-        else:
-            text = "[ERROR]: Missing highlight text"
-
-        if book and getattr(book, "category", None) == "tweets":
-            text += f"[↗️]({highlight.url or 'n/a'})"
-            url = getattr(highlight, "url", None)
-
-            # text_block = HighlightBlockSpec(text=text, is_primary=True)
-
-            # if url:
-            #     root = HighlightBlockSpec(text=url, children=[text_block])
-            #     return HighlightBlockPlan(root=root)
-
-            # return HighlightBlockPlan(root=text_block)
-
-        return HighlightBlockPlan(root=HighlightBlockSpec(text=text, is_primary=True))
-
-    # process_highlight
     def _render_highlight_block_tree(
         self,
         parent_uid: str | int,
@@ -647,31 +594,6 @@ class RoamDailyNoteHighlightWriter:
             block_tree=block_tree,
         )
 
-    # process_highlight
-    def _get_last_highlight_snapshot(
-        self, highlight_id: int
-    ) -> RoamHighlightSnapshot | None:
-        """
-        Fetch the most recent snapshot for a highlight.
-
-        Parameters
-        ----------
-        highlight_id : int
-            Identifier of the highlight whose snapshots should be inspected.
-
-        Returns
-        -------
-        RoamHighlightSnapshot | None
-            Most recent snapshot instance, or `None` if none exist.
-        """
-        return (
-            self._session.query(RoamHighlightSnapshot)
-            .filter_by(highlight_id=highlight_id)
-            .order_by(RoamHighlightSnapshot.version.desc())
-            .first()
-        )
-
-    # process_daily_note
     def _execute_batch_action(
         self, roam_batch_action: RoamBatchAction
     ) -> dict[str, str]:
@@ -692,8 +614,7 @@ class RoamDailyNoteHighlightWriter:
         if not actions:
             return {}
         return roam_batch_action.execute_batch_action() or {}
-    
-    # process_daily_note
+
     def _resolve_uid(self, tempid_map: dict[str, str], uid: str | int) -> str:
         """Resolve a UID candidate using the tempid map.
 
@@ -721,7 +642,20 @@ class RoamDailyNoteHighlightWriter:
             return resolved
         return tempid_map.get(uid, uid)
 
-    # _process_daily_note
+    def _record_page_seen(self, page_uid: str) -> None:
+        """
+        Record that a page has been seen in the RoamKnownPage table.
+
+        Parameters
+        ----------
+        page_uid : str
+            UID of the page that has been seen.
+
+        """
+        now = datetime.now()
+        self._session.add(RoamKnownPage(page_uid=page_uid, last_verified_at=now))
+        self._session.flush()
+
     def _upsert_page(
         self,
         existing_page: RoamPage | None,
@@ -762,7 +696,6 @@ class RoamDailyNoteHighlightWriter:
         existing_page.export_batch = export_batch
         return existing_page
 
-    # _process_daily_note
     def _add_staged_books_to_session(
         self,
         book_exports: list[StagedBookExport],
@@ -793,7 +726,6 @@ class RoamDailyNoteHighlightWriter:
                 )
             )
 
-    # _process_daily_note
     def _add_staged_highlights_to_session(
         self,
         highlight_exports: list[StagedHighlightExport],
@@ -825,7 +757,6 @@ class RoamDailyNoteHighlightWriter:
                 )
             )
 
-    # _process_daily_note
     def _add_staged_highlight_snapshots_to_session(
         self,
         snapshots: list[StagedHighlightSnapshot],
@@ -860,7 +791,6 @@ class RoamDailyNoteHighlightWriter:
                 )
             )
 
-    # _process_daily_note
     #! Can't we just remove page, and then only create a page if it doesn't exist?
     def _create_page_snapshot(
         self,
@@ -895,27 +825,6 @@ class RoamDailyNoteHighlightWriter:
         )
         self._session.add(snapshot)
 
-    @staticmethod
-    def stable_hash(obj: dict[str, Any]) -> str:
-        """
-        Return a stable SHA256 hash for a JSON-serializable object.
-
-        Parameters
-        ----------
-        obj : dict[str, Any]
-            JSON-serializable object to hash.
-
-        Returns
-        -------
-        str
-            Hexadecimal SHA256 hash of the object.
-        """
-        # sort_keys=True ensures deterministic ordering
-        return hashlib.sha256(
-            json.dumps(obj, sort_keys=True).encode("utf-8")
-        ).hexdigest()
-
-    # _add_staged_highlight_snapshots_to_session
     def _resolve_block_tree(
         self, block_tree: dict[str, Any], tempid_map: dict[str, str]
     ) -> dict[str, Any]:
@@ -930,6 +839,77 @@ class RoamDailyNoteHighlightWriter:
             "children": resolved_children,
         }
         return resolved_tree
+
+    def _get_existing_book_export(
+        self, daily_note_uid: str, user_book_id: int
+    ) -> RoamBookExport | None:
+        """
+        Fetch an existing book export for the specified page and book.
+
+        Parameters
+        ----------
+        daily_note_uid : str
+            UID of the daily note page.
+        user_book_id : int
+            Identifier of the book.
+
+        Returns
+        -------
+        RoamBookExport | None
+            Existing export record if present, otherwise `None`.
+        """
+        return (
+            self._session.query(RoamBookExport)
+            .filter_by(user_book_id=user_book_id, page_uid=daily_note_uid)
+            .first()
+        )
+
+    def _get_existing_highlight_export(
+        self, daily_note_uid: str, highlight_id: int
+    ) -> RoamHighlightExport | None:
+        """
+        Fetch an existing highlight export for the specified page and highlight.
+
+        Parameters
+        ----------
+        daily_note_uid : str
+            UID of the daily note page.
+        highlight_id : int
+            Identifier of the highlight.
+
+        Returns
+        -------
+        RoamHighlightExport | None
+            Existing export record if present, otherwise `None`.
+        """
+        return (
+            self._session.query(RoamHighlightExport)
+            .filter_by(highlight_id=highlight_id, page_uid=daily_note_uid)
+            .first()
+        )
+
+    def _get_last_highlight_snapshot(
+        self, highlight_id: int
+    ) -> RoamHighlightSnapshot | None:
+        """
+        Fetch the most recent snapshot for a highlight.
+
+        Parameters
+        ----------
+        highlight_id : int
+            Identifier of the highlight whose snapshots should be inspected.
+
+        Returns
+        -------
+        RoamHighlightSnapshot | None
+            Most recent snapshot instance, or `None` if none exist.
+        """
+        return (
+            self._session.query(RoamHighlightSnapshot)
+            .filter_by(highlight_id=highlight_id)
+            .order_by(RoamHighlightSnapshot.version.desc())
+            .first()
+        )
 
 
 if __name__ == "__main__":

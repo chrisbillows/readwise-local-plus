@@ -9,6 +9,8 @@ a single use case then it keep in a specific workflow.
 """
 
 import logging
+import random
+import time
 from datetime import date
 from typing import Any, Iterable, cast
 
@@ -77,6 +79,8 @@ class RoamClient:
     """
 
     BASE_URL = "https://api.roamresearch.com/api/graph"
+    MAX_RETRIES = 5
+    BASE_BACKOFF_SECONDS = 5.0
 
     def __init__(self) -> None:
         """
@@ -160,9 +164,40 @@ class RoamClient:
                 error_msg = response.text
             raise RoamAPIError(f"{response.status_code}: {error_msg}")
 
+    def _get_retry_delay(self, response: requests.Response, attempt: int) -> float:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after is not None:
+            try:
+                return max(float(retry_after), 0.0)
+            except ValueError:
+                logger.debug("Invalid Retry-After header from Roam: %s", retry_after)
+
+        # Simple exponential backoff with a little jitter.
+        delay = self.BASE_BACKOFF_SECONDS * (2 ** attempt)
+        return delay + random.uniform(0, 1)
+
     def _post(self, endpoint: str, payload: dict[str, Any]) -> Any:
         url = f"{self.BASE_URL}/{self.graph_name}/{endpoint}"
-        response = requests.post(url, headers=self._headers(), json=payload)
+        for attempt in range(self.MAX_RETRIES + 1):
+            response = requests.post(url, headers=self._headers(), json=payload)
+            if response.status_code not in (429, 503):
+                return self._handle_response(response)
+
+            if attempt == self.MAX_RETRIES:
+                return self._handle_response(response)
+
+            delay = self._get_retry_delay(response, attempt)
+            logger.warning(
+                "Roam %s hit %s. Retrying in %.1fs (attempt %s/%s).",
+                endpoint,
+                response.status_code,
+                delay,
+                attempt + 1,
+                self.MAX_RETRIES,
+            )
+            time.sleep(delay)
+
+        # Unreachable, but keeps the return type obvious.
         return self._handle_response(response)
 
     def _query(self, datalog: str, args: list[Any]) -> Any:
