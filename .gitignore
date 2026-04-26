@@ -1,6 +1,7 @@
 # Readwise-Local-Plus
 tests/data/real/
 .vscode
+.codex
 
 # Byte-compiled / optimized / DLL files
 __pycache__

@@ -17,7 +17,9 @@ from readwise_local_plus.utils import (
     list_invalid_db_objects,
     readwise_api_fetch_since_custom_date,
 )
-from readwise_local_plus.workflows.roam_daily_note import RoamDailyNoteHighlightWriter
+from readwise_local_plus.workflows.chatgpt_daily_prototype import (
+    write_batch_to_daily_notes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -159,8 +161,7 @@ def main(user_config: Optional[UserConfig] = None) -> None:
     if args.command == "sync":
         if args.batch_id is not None:
             logger.info("Writing existing Readwise batch %s to Roam.", args.batch_id)
-            rdw = RoamDailyNoteHighlightWriter(args.batch_id)
-            rdw.write_batch_to_daily_notes()
+            write_batch_to_daily_notes(args.batch_id)
         elif args.all:
             logger.info("Running full sync (--all).")
             run_pipeline_flattened_objects(user_config, last_fetch=None)
@@ -172,8 +173,7 @@ def main(user_config: Optional[UserConfig] = None) -> None:
             )
             print("Batch written was: ", batch_written)
             if batch_written:
-                rdw = RoamDailyNoteHighlightWriter(batch_written)
-                rdw.write_batch_to_daily_notes()
+                write_batch_to_daily_notes(batch_written)
 
     elif args.command == "list-invalids":
         list_invalid_db_objects(user_config)
