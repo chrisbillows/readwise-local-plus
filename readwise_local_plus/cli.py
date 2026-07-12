@@ -162,7 +162,7 @@ def main(user_config: Optional[UserConfig] = None) -> None:
 
     if args.command == "sync":
         if args.batch_id is not None:
-            logger.info("Writing existing Readwise batch %s to Roam.", args.batch_id)
+            logger.info("Writing existing Readwise batch %s to Obsidian.", args.batch_id)
             # write_batch_to_daily_notes(args.batch_id)
             obsidian_experiment(user_config, args.batch_id)
         elif args.all:
