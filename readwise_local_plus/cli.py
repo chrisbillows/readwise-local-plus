@@ -21,7 +21,7 @@ from readwise_local_plus.workflows.chatgpt_daily_prototype import (
     write_batch_to_daily_notes,
 )
 
-from readwise_local_plus.integrations.obsidian import obsidian_experiment
+from readwise_local_plus.integrations.obsidian import write_batch_to_obsidian
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,7 @@ def main(user_config: Optional[UserConfig] = None) -> None:
         if args.batch_id is not None:
             logger.info("Writing existing Readwise batch %s to Obsidian.", args.batch_id)
             # write_batch_to_daily_notes(args.batch_id)
-            obsidian_experiment(user_config, args.batch_id)
+            write_batch_to_obsidian(user_config, args.batch_id)
         elif args.all:
             logger.info("Running full sync (--all).")
             run_pipeline_flattened_objects(user_config, last_fetch=None)

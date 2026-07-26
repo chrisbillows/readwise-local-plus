@@ -35,9 +35,12 @@ Going with this is as the desired format:
 > - I mean, the thing about Hitler being better than Jagger.
 ```
 
-So first lets split number of speakers
+- Now we have split transcripts into speaker / text
 
-SAMPLES:
+
+## Reference
+
+TRANSCRIPT SAMPLES:
 
 Single speaker:
 [(0, 'Dominic Sandbrook'), (1, 'Callaghan is brilliant at...')]
