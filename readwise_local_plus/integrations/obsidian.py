@@ -1,29 +1,258 @@
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, date
 import logging
 from typing import Any
-from readwise_local_plus.config import UserConfig
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 from pathlib import Path
 
+from readwise_local_plus.config import UserConfig, fetch_user_config
+from readwise_local_plus.db_operations import get_session
 
-REQUIRED_PARENT_FOLDERS = ["podcasts"]
+from readwise_local_plus.models import (
+    Book,
+    Highlight,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
-def ensure_rw_parent_folders(
-        user_config: UserConfig, required_folders: list[int] = REQUIRED_PARENT_FOLDERS
+REQUIRED_CATEGORY_DIRS = ["podcasts"]
+# key is rw name, value is desired name
+PODCAST_DIR_MAP = {
+    "The Rest Is History": "Rest Is History",
+    "The Rest Is Politics": "Rest Is Politics",
+}
+
+
+# Duplicate from chatgpt_daily_prototype - likely pull out into new module and combine
+@dataclass
+class HighlightFromDb:
+    user_book_id: int
+    id: int
+    text: str
+    note: str | None
+    location: int | None
+    created_at: datetime | None
+    updated_at: datetime | None
+    url: str | None
+    readwise_url: str | None
+
+    def __repr__(self) -> str:
+        return f"HL()"
+
+
+# Duplicate from chatgpt_daily_prototype - likely pull out into new module and combine
+@dataclass
+class BookFromDb:
+    user_book_id: int
+    title: str
+    author: str
+    readable_title: str
+    source: str
+    unique_url: str
+    category: str
+    readwise_url: str
+    source_url: str
+    highlights: list[HighlightFromDb] = field(default_factory=list)
+
+    def __repr__(self) -> str:
+        total_highlights = len(self.highlights)
+        return f"Book(HLs: {total_highlights} | {self.title})"
+
+
+# Duplicate from chatgpt_daily_prototype - likely pull out into new module and combine
+class DbData:
+    """
+    Build daily note payload:
+    dict[date] -> list[DNBook]
+    """
+
+    def __init__(self, batch_id: int) -> None:
+        self.batch_id = batch_id
+        self._session: Session = get_session(fetch_user_config().db_path)
+        self.grouped = {}
+
+    def build(self) -> dict[int, BookFromDb]:
+        logger.info("Create payload for batch: %s", self.batch_id)
+
+        rows = self._fetch()
+
+        for row in rows:
+            self._process_row(row)
+
+        self._session.close()
+
+        return self.grouped
+
+    def _fetch(self) -> list[Highlight]:
+        stmt = (
+            select(Highlight)
+            .join(Highlight.book)
+            .where(
+                Highlight.batch_id == self.batch_id,
+                Book.category.in_(["podcasts"]),
+                Highlight.is_discard.is_(False),
+            )
+            .options(
+                selectinload(Highlight.book).load_only(
+                    Book.user_book_id,
+                    Book.title,
+                    Book.category,
+                    Book.author,
+                    Book.source,
+                    Book.source_url,
+                    Book.unique_url,
+                    Book.readwise_url,
+                    Book.readable_title,
+                )
+            )
+            .order_by(Highlight.created_at, Highlight.book_id, Highlight.id)
+        )
+
+        rows = self._session.execute(stmt).scalars().all()
+        logger.info("%s highlights fetched", len(rows))
+        return rows
+    
+    def _clean_author(self, author: str, mappings: dict = PODCAST_DIR_MAP) -> str:
+        """
+        Convert 'author' to preferred format.
+
+        For podcasts, 'author' is the podcast name. In Obsidian this will be the parent
+        directory. Overwrite readwise default with user preferred value defined in
+        PODCAST_DIR_MAP.
+        """
+        if author in mappings.keys():
+            return mappings[author]
+        else:
+            return author
+
+    def _process_row(self, h: Highlight) -> None:
+        book_id = h.book.user_book_id
+
+        if not self.grouped.get(book_id):
+            clean_author = self._clean_author(h.book.author) 
+            self.grouped[book_id] = BookFromDb(
+                    user_book_id=book_id,
+                    title=h.book.title,
+                    author=clean_author,
+                    readable_title=h.book.readable_title,
+                    source=h.book.source,
+                    category=h.book.category,
+                    unique_url=h.book.unique_url,
+                    readwise_url=h.book.readwise_url,
+                    source_url=h.book.source_url,
+                )
+
+        self.grouped[book_id].highlights.append(
+            HighlightFromDb(
+                user_book_id=book_id,
+                id=h.id,
+                text=h.text,
+                note=h.note,
+                location=h.location,
+                created_at=h.created_at,
+                updated_at=h.updated_at,
+                url=h.url,
+                readwise_url=h.readwise_url,
+            )
+        )
+
+# --- WIP stuff figuring out processing steps ---
+# ----  Makes most sense as a method on BookFromDb or HighlightFromDb? ---
+
+
+def obsidian_safe_filenames(file_name: str) -> str:
+    ILLEGAL_CHARS_TABLE = str.maketrans(dict.fromkeys("#^|[]"))
+    return file_name.translate(ILLEGAL_CHARS_TABLE)   
+
+
+def get_batch_highlights(batch_id: int) -> dict[int, BookFromDb]:
+    """Fetch highlights for a given batch from the RW db."""
+    db_data = DbData(batch_id)
+    grouped_highlights = db_data.build()
+    return grouped_highlights
+
+
+def ensure_dir_exists(dir_path: Path, parents: bool = False) -> None:
+    if not dir_path.is_dir():
+        dir_path.mkdir(parents=parents) # Error if exists, or parents don't exist
+        logger.info(f"Created dir: {dir_path}")
+
+
+def ensure_readwise_dirs(
+        user_config: UserConfig, category_dirs: list[int] = REQUIRED_CATEGORY_DIRS
     ) -> None:
-    for required_folder in REQUIRED_PARENT_FOLDERS:
-        expected_path = user_config.obsidian_vault_path / required_folder
-        if not expected_path.is_dir():
-            expected_path.mkdir() # Error if exists, or parents don't exist
-            logger.info(f"Created required folder: {expected_path}")
+    """
+    Create Readwise and category dirs, if not present.
+    """
+    # This will create the Readwise dir if it doesn't exist also.
+    for category_folder in category_dirs:
+        expected_path = user_config.obsidian_rw_dir / category_folder
+        ensure_dir_exists(expected_path, True)        
 
 
-def obsidian_experiment(user_config: UserConfig, batch_id: int):
-    print("Hello Obsidian Export!")
-    # obs_root_dirs = get_dirs(user_config.obsidian_vault_path)
-    ensure_rw_parent_folders(user_config)
+def create_frontmatter():
+    pass
 
+
+def format_title(title_text: str) -> str:
+    title_text = title_text.replace("**", "")
+    return "# " + title_text
+
+
+def split_transcript(raw: str) -> str:
+    raw = raw[12:]
+    raw = raw.replace("\n\n", "\n")
+    raw = list(raw.split("\n"))
+
+    transcript_by_speaker = []
+    for even_idx in range(0, len(raw), 2):
+        speaker = raw[even_idx]
+        raw = raw[even_idx + 1]
+        transcript_by_speaker.append((speaker, raw))
+
+    return raw
+
+
+def format_highlight(hl_text: HighlightFromDb):
+    title, summary, transcript = hl_text.split("\n\n", 2)
+    title_text = format_title(title)
+    transcript_by_speaker = split_transcript(transcript)
+    for speaker, raw in transcript_by_speaker:
+        print(f"{speaker}: {raw[:10]}")
+    # print(title_text)
+    # print(summary)
+    # print(trans)
+
+    print("-------")
+    # breakpoint()
+    
+    # Remove bold around title
+    opening, separator, rest = hl_text.partition("\n")
+    opening = opening.removeprefix("**").removesuffix("**")
+    
+    return "##" + opening + separator + rest + "\n"
+
+
+def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
+    """Entry point function to write a batch of highlights to Obsidian."""
+    ensure_readwise_dirs(user_config)
+    batch_highlights = get_batch_highlights(batch_id)
+    
+    for user_book_id, book in batch_highlights.items():
+        for hl in book.highlights:
+            format_highlight(hl.text)
+
+        # clean_author should be moved here?
+        # book_dir = user_config.obsidian_rw_dir / book.category / book.author
+        # ensure_dir_exists(book_dir)
+        
+        # episode_file = f"{book.title}.md"
+        # episode_file_path = book_dir / episode_file
+        # episode_file_path.touch()
+        # logger.info(f"Created file: {episode_file_path}")
 
