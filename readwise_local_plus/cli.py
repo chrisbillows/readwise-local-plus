@@ -161,6 +161,8 @@ def main(user_config: Optional[UserConfig] = None) -> None:
     args = parse_args()
 
     if args.command == "sync":
+        # Run with batch_id to test obsidian sync
+        # DON'T MESS WITH args.all as you are using this version for real syncing!
         if args.batch_id is not None:
             logger.info("Writing existing Readwise batch %s to Obsidian.", args.batch_id)
             # write_batch_to_daily_notes(args.batch_id)
