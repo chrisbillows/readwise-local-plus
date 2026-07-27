@@ -8,8 +8,14 @@ There is a comment there but you will break `rwlp sync` and we're still using th
 
 ## Current progress
 
+Test with 
+
+```shell
+rwlp sync --batch-id <batch>
+```
+
+- I've been testing with batch `113` and `112` (and previously `99`).
 - `cli.py` calls  `write_batch_to_obsidian` from `obsidian.py`.
-- In testing I've been mainly using batch `113` and `112` (and previously `99`).
 
 - So we are splitting highlights effectively it seems
 - Working through formatting
@@ -35,7 +41,22 @@ Going with this is as the desired format:
 > - I mean, the thing about Hitler being better than Jagger.
 ```
 
-- Now we have split transcripts into speaker / text
+- Now we have split transcripts into speaker / text like this:
+
+```shell
+['Dominic Sandbrook', "quote...", 'speaker', "quote", 'speaker', "quote"]
+```
+- Refactored the code into a proper loop
+- Have dividers for possible splitting into functions/methods
+- Should now create a decent export for a podcast episode
+
+- ISSUES:
+    - need to build append logic out
+    - full stop for last split quote
+    - still need front matter
+        - what do we have? ideal would be the episode description etc.
+        - just quote is a little sans context
+    
 
 
 ## Reference

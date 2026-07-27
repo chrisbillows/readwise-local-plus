@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 
 REQUIRED_CATEGORY_DIRS = ["podcasts"]
 # key is rw name, value is desired name
-PODCAST_DIR_MAP = {
+
+PODCAST_TITLE_MAP = {
     "The Rest Is History": "Rest Is History",
     "The Rest Is Politics": "Rest Is Politics",
 }
@@ -117,7 +118,7 @@ class DbData:
         logger.info("%s highlights fetched", len(rows))
         return rows
     
-    def _clean_author(self, author: str, mappings: dict = PODCAST_DIR_MAP) -> str:
+    def _clean_author(self, author: str, mappings: dict = PODCAST_TITLE_MAP) -> str:
         """
         Convert 'author' to preferred format.
 
@@ -165,9 +166,62 @@ class DbData:
 # ----  Makes most sense as a method on BookFromDb or HighlightFromDb? ---
 
 
+
 def obsidian_safe_filenames(file_name: str) -> str:
-    ILLEGAL_CHARS_TABLE = str.maketrans(dict.fromkeys("#^|[]"))
-    return file_name.translate(ILLEGAL_CHARS_TABLE)   
+    ILLEGAL_CHARS_TABLE = str.maketrans(dict.fromkeys('*"\//<>:|?#^[]'))
+    return file_name.translate(ILLEGAL_CHARS_TABLE)
+
+
+def revise_podcast_title(raw_title: str) -> str:
+    safe_title = obsidian_safe_filenames(raw_title)
+    if safe_title in PODCAST_TITLE_MAP:
+        safe_title = PODCAST_TITLE_MAP[safe_title]
+    return safe_title
+
+
+def create_hl_frontmatter():
+    pass
+
+
+def split_quotes(raw_quote: str) -> str:
+    split_quote = raw_quote.split(". ")
+    return split_quote
+
+
+def split_transcript(raw: str) -> list[tuple[str, str]]:
+    raw = raw[12:]
+    raw = raw.replace("\n\n", "\n")
+    raw = list(raw.split("\n"))
+
+    transcript_by_speaker = []
+    for even_idx in range(0, len(raw), 2):
+        speaker = raw[even_idx]
+        quote = raw[even_idx + 1]
+        transcript_by_speaker.append((speaker, quote))
+    return transcript_by_speaker
+
+
+def format_hl_title(title_text: str) -> str:
+    title_text = title_text.replace("**", "")
+    return "# " + title_text
+
+
+def format_highlight(hl_text: HighlightFromDb) -> str:
+    title, summary, transcript = hl_text.split("\n\n", 2)
+
+    fmtd_title = format_hl_title(title)
+
+    transcript_by_speaker = split_transcript(transcript)
+
+    for speaker, quote in transcript_by_speaker:
+        split_quote = split_quotes(quote)
+        fmtd_split_quote = "".join([f"> - {str}\n" for str in split_quote])
+
+        fmtd_transcript = f"> [!quote] {speaker}\n{fmtd_split_quote}"
+
+    fmtd_highlight = fmtd_title + "\n\n" + summary + "\n\n" + fmtd_transcript + "\n\n"
+     
+    return fmtd_highlight
 
 
 def get_batch_highlights(batch_id: int) -> dict[int, BookFromDb]:
@@ -195,64 +249,43 @@ def ensure_readwise_dirs(
         ensure_dir_exists(expected_path, True)        
 
 
-def create_frontmatter():
-    pass
-
-
-def format_title(title_text: str) -> str:
-    title_text = title_text.replace("**", "")
-    return "# " + title_text
-
-
-def split_transcript(raw: str) -> str:
-    raw = raw[12:]
-    raw = raw.replace("\n\n", "\n")
-    raw = list(raw.split("\n"))
-
-    transcript_by_speaker = []
-    for even_idx in range(0, len(raw), 2):
-        speaker = raw[even_idx]
-        raw = raw[even_idx + 1]
-        transcript_by_speaker.append((speaker, raw))
-
-    return raw
-
-
-def format_highlight(hl_text: HighlightFromDb):
-    title, summary, transcript = hl_text.split("\n\n", 2)
-    title_text = format_title(title)
-    transcript_by_speaker = split_transcript(transcript)
-    for speaker, raw in transcript_by_speaker:
-        print(f"{speaker}: {raw[:10]}")
-    # print(title_text)
-    # print(summary)
-    # print(trans)
-
-    print("-------")
-    # breakpoint()
-    
-    # Remove bold around title
-    opening, separator, rest = hl_text.partition("\n")
-    opening = opening.removeprefix("**").removesuffix("**")
-    
-    return "##" + opening + separator + rest + "\n"
-
-
 def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
     """Entry point function to write a batch of highlights to Obsidian."""
     ensure_readwise_dirs(user_config)
     batch_highlights = get_batch_highlights(batch_id)
-    
-    for user_book_id, book in batch_highlights.items():
-        for hl in book.highlights:
-            format_highlight(hl.text)
 
-        # clean_author should be moved here?
-        # book_dir = user_config.obsidian_rw_dir / book.category / book.author
-        # ensure_dir_exists(book_dir)
+    # each `Book` obj is a podcast_episode
+    for user_book_id, podcast_episode in batch_highlights.items():
+
+        # create podcast dir after no errors in content
+        # 1 ---- CREATE EPISODE FILE CONTENT
         
-        # episode_file = f"{book.title}.md"
-        # episode_file_path = book_dir / episode_file
-        # episode_file_path.touch()
-        # logger.info(f"Created file: {episode_file_path}")
+        batch_episode_content = []
+        for hl in podcast_episode.highlights:
+            fmtd_hl = format_highlight(hl.text)
+            batch_episode_content.append(fmtd_hl)
 
+        batch_episode_content = "".join(batch_episode_content)
+
+        # 2 ---- ENSURE POD DIR EXISTS
+
+        raw_podcast_title = podcast_episode.author
+        revised_podcast_title = revise_podcast_title(raw_podcast_title)
+
+        # `podcasts` aka book.category is hardcoded for consistency
+        podcast_dir = user_config.obsidian_rw_dir / "podcasts" / revised_podcast_title
+        ensure_dir_exists(podcast_dir)
+
+        # 3 ---- WRITE / APPEND EPISODE CONTENT
+
+        episode_name = obsidian_safe_filenames(podcast_episode.title) + ".md"
+        episode_file = podcast_dir / episode_name
+
+        if not episode_name.exists():
+            # file create logic
+            episode_file.write_text(batch_episode_content)
+            logger.info(f"Episode created:: {episode_file.name}")
+        else:
+            # file append logic
+            ### CREATE APPEND LOGIC WITH OPEN - CANT WITH PATHLIB
+            logger.info(f"Episode appended: {episode_file.name}")
