@@ -50,16 +50,36 @@ Going with this is as the desired format:
 - Have dividers for possible splitting into functions/methods
 - Should now create a decent export for a podcast episode
 
+
+Have now added basic front matter
+
+
 - ISSUES:
+    - Readwise does not get show notes / AI episodes / chapter
+        - They are in the snipd link, so maybe scrape?? 
+        - Show notes on their own prob quick... but will need formating per podcast
     - need to build append logic out
     - full stop for last split quote
-    - still need front matter
-        - what do we have? ideal would be the episode description etc.
-        - just quote is a little sans context
-    
+  
 
 
 ## Reference
+
+FRONT MATTER EXAMPLE
+
+---
+title: "Iran’s youth hoped for revolution. Instead they waded through blood"
+source: "https://www.thetimes.com/world/middle-east/article/life-in-iran-protests-trump-us-war-hhgbrd5s7"
+author:
+  - "[[Catherine Philp]]"
+published: 2026-07-29
+created: 2026-07-30
+description: "Reza joined protests in Mashhad in January. Now, traumatised by state violence, his only wish is to escape as Trump’s war continues"
+tags:
+  - "clippings"
+site: "[[The Times]]"
+---
+
 
 TRANSCRIPT SAMPLES:
 

@@ -168,7 +168,7 @@ class DbData:
 
 
 def obsidian_safe_filenames(file_name: str) -> str:
-    ILLEGAL_CHARS_TABLE = str.maketrans(dict.fromkeys('*"\//<>:|?#^[]'))
+    ILLEGAL_CHARS_TABLE = str.maketrans(dict.fromkeys('*"\\/<>:|?#^[]'))
     return file_name.translate(ILLEGAL_CHARS_TABLE)
 
 
@@ -178,9 +178,54 @@ def revise_podcast_title(raw_title: str) -> str:
         safe_title = PODCAST_TITLE_MAP[safe_title]
     return safe_title
 
+front_matter_template = """
+---
+title: {{title}}
+source: {{source}}"https://www.thetimes.com/world/middle-east/article/life-in-iran-protests-trump-us-war-hhgbrd5s7"
+listened: {{listened_date}}
+created: {{created_date}}
+tags:
+- {{podcast_title}}
+- "podcast-eps"
+    ---
+"""
 
-def create_hl_frontmatter():
-    pass
+# ('user_book_id', 60885817)
+# ('title', 'How... The Elections Were Won and Lost: Michael Heseltine')
+# ('author', 'How To Win An Election')
+# ('readable_title', 'How... The Elections Were Won and Lost: Michael Heseltine')
+# ('source', 'snipd')
+# ('unique_url', 'https://share.snipd.com/episode/2450ca8f-8fd4-422c-8640-903d5c89922e')
+# ('category', 'podcasts')
+# ('readwise_url', 'https://readwise.io/bookreview/60885817')
+# ('source_url', 'https://share.snipd.com/episode/2450ca8f-8fd4-422c-8640-903d5c89922e')
+# ('highlights', [HL(), HL(), HL(), HL(), HL(), HL()])
+
+
+def create_episode_frontmatter(podcast_episode: BookFromDb, revised_title: str) -> str:
+
+    front_matter_template = """---
+title: {{title}}
+source: {{source}}
+listened: {{listened_date}}
+created: {{created_date}}
+tags:
+- podcast/{{podcast_title}}
+- podcast-eps
+---
+"""
+
+    template_replacements = {
+        "{{title}}": podcast_episode.title,
+        "{{listened_date}}": str(podcast_episode.highlights[0].created_at.date()),
+        "{{source}}": podcast_episode.source_url,  # snipd url
+        "{{created_date}}": str(date.today()),
+        "{{podcast_title}}": revised_title.lower().replace(" ", "-"),
+    }
+
+    for placeholder, value in template_replacements.items():
+        front_matter_template = front_matter_template.replace(placeholder, value)
+    return front_matter_template
 
 
 def split_quotes(raw_quote: str) -> str:
@@ -257,15 +302,24 @@ def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
     # each `Book` obj is a podcast_episode
     for user_book_id, podcast_episode in batch_highlights.items():
 
+        # 0 ---- CREATE GENERAL VARS
+
+        raw_podcast_title = podcast_episode.author
+        revised_podcast_title = revise_podcast_title(raw_podcast_title)
+
         # create podcast dir after no errors in content
         # 1 ---- CREATE EPISODE FILE CONTENT
+
+        episode_front_matter = create_episode_frontmatter(
+            podcast_episode, revised_podcast_title
+        )
         
         batch_episode_content = []
         for hl in podcast_episode.highlights:
             fmtd_hl = format_highlight(hl.text)
             batch_episode_content.append(fmtd_hl)
 
-        batch_episode_content = "".join(batch_episode_content)
+        batch_episode_content = episode_front_matter + "".join(batch_episode_content)
 
         # 2 ---- ENSURE POD DIR EXISTS
 
@@ -281,7 +335,7 @@ def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
         episode_name = obsidian_safe_filenames(podcast_episode.title) + ".md"
         episode_file = podcast_dir / episode_name
 
-        if not episode_name.exists():
+        if not episode_file.exists():
             # file create logic
             episode_file.write_text(batch_episode_content)
             logger.info(f"Episode created:: {episode_file.name}")
