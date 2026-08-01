@@ -181,7 +181,7 @@ def revise_podcast_title(raw_title: str) -> str:
 front_matter_template = """
 ---
 title: {{title}}
-source: {{source}}"https://www.thetimes.com/world/middle-east/article/life-in-iran-protests-trump-us-war-hhgbrd5s7"
+source: {{source}}
 listened: {{listened_date}}
 created: {{created_date}}
 tags:
