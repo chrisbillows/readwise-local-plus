@@ -58,6 +58,7 @@ class BookFromDb:
     category: str
     readwise_url: str
     source_url: str
+    cover_image_url: str
     highlights: list[HighlightFromDb] = field(default_factory=list)
 
     def __repr__(self) -> str:
@@ -109,6 +110,7 @@ class DbData:
                     Book.unique_url,
                     Book.readwise_url,
                     Book.readable_title,
+                    Book.cover_image_url,
                 )
             )
             .order_by(Highlight.created_at, Highlight.book_id, Highlight.id)
@@ -146,6 +148,7 @@ class DbData:
                     unique_url=h.book.unique_url,
                     readwise_url=h.book.readwise_url,
                     source_url=h.book.source_url,
+                    cover_image_url = h.book.cover_image_url,
                 )
 
         self.grouped[book_id].highlights.append(
@@ -320,6 +323,12 @@ def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
             batch_episode_content.append(fmtd_hl)
 
         batch_episode_content = episode_front_matter + "".join(batch_episode_content)
+
+        # 3 ---- ADD SNIPD METADATA (will come from db)
+
+        # a) pull metadata from db
+        # b) format db metadata
+        # c) add metadata to batch episode content
 
         # 2 ---- ENSURE POD DIR EXISTS
 
