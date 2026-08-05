@@ -51,7 +51,20 @@ Going with this is as the desired format:
 - Should now create a decent export for a podcast episode
 
 
-Have now added basic front matter
+Have now added basic front matter.
+
+- Scope explosion
+  - Explored adding show notes (originally also chapter headings)
+  - requires a webscraping step
+          - and should be stored in the db as additional metadata
+          - which should really be a refactor
+  - then a display step
+
+Ideally, at least two if not three tickets
+
+Issue with closing mvp functionality is the CLI
+- so perhaps we reconfigure CLI... although again, feels like another ticket
+
 
 
 - ISSUES:
@@ -61,6 +74,8 @@ Have now added basic front matter
     - need to build append logic out
     - full stop for last split quote
   
+
+- nltk needs to be pinned at 3.9.2  for dev, a new security feature to prevent shadowed dependencies doesn't work with an editable install
 
 
 ## Reference
