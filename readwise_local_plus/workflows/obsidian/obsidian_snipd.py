@@ -97,6 +97,7 @@ class DbData:
             .where(
                 Highlight.batch_id == self.batch_id,
                 Book.category.in_(["podcasts"]),
+                Book.source.is_("snipd"),
                 Highlight.is_discard.is_(False),
             )
             .options(
