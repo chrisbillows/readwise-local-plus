@@ -53,7 +53,12 @@ Going with this is as the desired format:
 
 Have now added basic front matter.
 
-- Scope explosion
+- Readwise does not get show notes / AI episodes / chapter
+  - They are in the snipd link, so maybe scrape?? 
+  - Show notes on their own prob quick... but will need formating per podcast
+ 
+
+Scope explosion!! 
   - Explored adding show notes (originally also chapter headings)
   - requires a webscraping step
           - and should be stored in the db as additional metadata
@@ -63,19 +68,17 @@ Have now added basic front matter.
 Ideally, at least two if not three tickets
 
 Issue with closing mvp functionality is the CLI
-- so perhaps we reconfigure CLI... although again, feels like another ticket
+ - so perhaps we reconfigure CLI... although again, feels like another ticket
 
 
+Have now split into three ticketsbranches defined in [](../features/snipd_int.md#phase-1--ticket-79---mvp) etc.
 
-- ISSUES:
-    - Readwise does not get show notes / AI episodes / chapter
-        - They are in the snipd link, so maybe scrape?? 
-        - Show notes on their own prob quick... but will need formating per podcast
-    - need to build append logic out
-    - full stop for last split quote
-  
 
-- nltk needs to be pinned at 3.9.2  for dev, a new security feature to prevent shadowed dependencies doesn't work with an editable install
+- REMAINGING ISSUES FOR 79 / MVP:
+  - need to sanatise front matter
+  - full stop for last split quote 
+  - need to build append logic out
+    
 
 
 ## Reference
