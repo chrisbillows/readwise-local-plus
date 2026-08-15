@@ -73,15 +73,55 @@ Issue with closing mvp functionality is the CLI
 
 Have now split into three ticketsbranches defined in [](../features/snipd_int.md#phase-1--ticket-79---mvp) etc.
 
-
 - REMAINGING ISSUES FOR 79 / MVP:
-  - need to sanatise front matter
-  - full stop for last split quote 
-  - need to build append logic out
+  - ✅need to sanatise front matter
+  - ✅full stop for last split quote 
+
+Are quotes "accurate"?
+- No - there is data loss...
+
+Sally has a quote in this:
+
+# By-Election Loss Could Be Framed As Leadership Failure
+
+- A by-election loss would be seized as evidence against the current Labour leadership and complicate concurrent contests.
+- Hugo says the loss would be labelled "his fault" during overlapping mayoral and leadership battles.
+
+> [!quote] Hugo Rifkind
+> - But it's an election that will be going on after this by-election that Labour could lose that will also be going on at the same time as a leadership election
+> - And if Labour does lose, it's his fault
+> - Isn't that politically complex?
+
+Ok - multiple quote issue is now fixed.
+
+
+Q: what is splitting on "dumb" full stops doing on question marks, exclaimation points or ellpsis etc.?
+- question marks end up mid sentence, reads ok
+- ellipsis get chopped... annoying but worth fixing?
+
+
+TODO
+- build append logic out
+- I would like to go to the readwise page for the raw quotes y'know...
     
 
 
 ## Reference
+
+Book Object contents:
+
+```
+# ('user_book_id', 60885817)
+# ('title', 'How... The Elections Were Won and Lost: Michael Heseltine')
+# ('author', 'How To Win An Election')
+# ('readable_title', 'How... The Elections Were Won and Lost: Michael Heseltine')
+# ('source', 'snipd')
+# ('unique_url', 'https://share.snipd.com/episode/2450ca8f-8fd4-422c-8640-903d5c89922e')
+# ('category', 'podcasts')
+# ('readwise_url', 'https://readwise.io/bookreview/60885817')
+# ('source_url', 'https://share.snipd.com/episode/2450ca8f-8fd4-422c-8640-903d5c89922e')
+# ('highlights', [HL(), HL(), HL(), HL(), HL(), HL()])
+```
 
 FRONT MATTER EXAMPLE
 
