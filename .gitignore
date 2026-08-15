@@ -1,3 +1,7 @@
+# html (working files)
+*.html
+
+
 # Readwise-Local-Plus
 tests/data/real/
 .vscode
