@@ -92,23 +92,23 @@ Sally has a quote in this:
 > - And if Labour does lose, it's his fault
 > - Isn't that politically complex?
 
-Ok - multiple quote issue is now fixed.
+✅ Ok - multiple quote issue is now fixed.
 
 
 Q: what is splitting on "dumb" full stops doing on question marks, exclaimation points or ellpsis etc.?
 - question marks end up mid sentence, reads ok
 - ellipsis get chopped... annoying but worth fixing?
 
-Added handling for question marks, ellipsis and full stops...
-
-Going to keep punctuation
+✅ Added handling for question marks, ellipsis and full stops...
 
 It's still not perfect (e.g. J.D. Vance) - replace with ntlk or codex calls when we use 
 those for importing
 
+✅ Going to keep punctuation inline
+
+✅ Added readwise page for the raw quotes
 
 TODO
-- Add readwise page for the raw quotes
 - build append logic out
 
     

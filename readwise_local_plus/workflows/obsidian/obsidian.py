@@ -345,7 +345,7 @@ def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
             fmtd_hl = format_highlight(hl.text)
             batch_episode_content.append(fmtd_hl)
 
-        batch_episode_content = episode_front_matter + "".join(batch_episode_content)
+        batch_episode_content = episode_front_matter + "\n" + "".join(batch_episode_content)
 
         # 3 ---- ADD SNIPD METADATA (will come from db)
 
