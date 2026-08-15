@@ -52,7 +52,7 @@ class UserConfig:
         self.roam_api_token: str | None = os.getenv("ROAM_API_TOKEN")
         self.roam_graph_name: str = "Billowz"
         self.obsidian_vault_path: Path = Path("/mnt/c/Users/chris/OneDrive/Documents/obsidian-temp")
-        self.obsidian_rw_dir: Path = self.obsidian_vault_path / "Readwise"
+        self.obsidian_rw_dir: Path = self.obsidian_vault_path / "readwise"
 
     def load_environment_variables_file(self) -> None:
         """
