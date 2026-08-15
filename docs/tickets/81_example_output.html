@@ -1,0 +1,157 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Chapter Headings</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: "Cascadia Code", monospace;
+      color: #e5e7eb;
+    }
+
+    body {
+      padding: 36px;
+    }
+
+    #sheet {
+      width: 1400px;
+      margin: 0 auto;
+      background: black;
+      padding: 38px;
+      border: 1px solid rgba(148,163,184,0.18);
+      box-shadow:
+        0 30px 90px rgba(0,0,0,0.55),
+        inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+
+    .header {
+      margin-bottom: 28px;
+      color: #f8fafc;
+    }
+
+    .title {
+      font-size: 50px;
+      line-height: 1.05;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin: 0 0 10px 0;
+      color: #ffffff;
+      text-shadow: 0 2px 18px rgba(0,0,0,0.35);
+    }
+
+    .content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 420px;
+        gap: 28px;
+        align-items: start;
+        margin-top: 24;
+    }
+
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-top: 24px;
+    }
+
+    .row {
+      display: flex;
+      align-items: flex-start;
+      gap: 18px;
+      padding: 18px 20px;
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(30,41,59,0.92) 0%, rgba(15,23,42,0.92) 100%);
+      border: 1px solid rgba(148,163,184,0.16);
+      box-shadow:
+        0 10px 28px rgba(0,0,0,0.22),
+        inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    .badge {
+      flex: 0 0 auto;
+      min-width: 58px;
+      height: 58px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      box-shadow:
+        0 10px 24px rgba(37,99,235,0.35),
+        inset 0 1px 0 rgba(255,255,255,0.16);
+    }
+
+    .text {
+      flex: 1;
+      min-width: 0;
+      font-size: 30px;
+      line-height: 1.25;
+      font-weight: 300;
+      letter-spacing: -0.02em;
+      color: #f8fafc;
+      padding-top: 5px;
+      word-break: break-word;
+    }
+
+    .image-panel img {
+        display: block;
+        width: 100%;
+        height: auth;
+        border-radius: 20px;
+    }
+
+  </style>
+</head>
+<body>
+  <div id="sheet">
+    <div class="header">
+      <h1 class="title">Show Notes</h1>
+    </div>
+    <div class="content">
+        <div class="list">
+            <div class="row">
+            <div class="badge">1</div>
+            <div class="text">We're only a week away from the Makerfield by-election, when voters could choose the next prime minister.</div>
+            </div>
+
+            <div class="row">
+                <div class="badge">2</div>
+                <div class="text"> If Andy Burnham wins, what happens in the hours and days after he arrives in Westminster?</div>
+            </div>
+            
+            <div class="row">
+                <div class="badge">3</div>
+                <div class="text">Will he seize the moment and try to challenge Keir Starmer immediately, or wait until he has a plan for running the country?</div>
+            </div>
+            
+            <div class="row">
+            <div class="badge">4</div>
+            <div class="text">And if he wins, what does it mean for Reform UK's electoral strategy?</div>
+            </div>
+            
+            <div class="row">
+            <div class="badge">5</div>
+            <div class="text">We also look at Steve Hilton's journey from David Cameron's modernising adviser to the race to be the next governor of California.</div>  
+            </div>
+        </div>
+        <div class="image-panel">
+            <img src="https://wsrv.nl/?url=https%3A%2F%2Fmegaphone.imgix.net%2Fpodcasts%2F00c0a118-2426-11ee-b258-73d331d0123b%2Fimage%2Fc791b54d89228ad14970204b5b0e23a0.jpg%3Fixlib%3Drails-4.3.1%26max-w%3D3000%26max-h%3D3000%26fit%3Dcrop%26auto%3Dformat%2Ccompress&w=512&h=512">
+        </div>
+    </div>
+  </div>
+</body>
+</html>
+
+
+
+
