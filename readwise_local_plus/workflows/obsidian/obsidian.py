@@ -340,12 +340,14 @@ def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
             podcast_episode, revised_podcast_title, safe_episode_name
         )
         
-        batch_episode_content = []
+        episode_content = []
         for hl in podcast_episode.highlights:
             fmtd_hl = format_highlight(hl.text)
-            batch_episode_content.append(fmtd_hl)
+            episode_content.append(fmtd_hl)
 
-        batch_episode_content = episode_front_matter + "\n" + "".join(batch_episode_content)
+        episode_content = "".join(episode_content)
+
+        episode_content_and_fm = episode_front_matter + "\n" + episode_content
 
         # 3 ---- ADD SNIPD METADATA (will come from db)
 
@@ -364,9 +366,12 @@ def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
 
         if not episode_file.exists():
             # file create logic
-            episode_file.write_text(batch_episode_content)
+            episode_file.write_text(episode_content_and_fm)
             logger.info(f"Episode created:: {episode_file.name}")
         else:
             # file append logic
-            ### CREATE APPEND LOGIC WITH OPEN - CANT WITH PATHLIB
+            # Use open as cannot append with pathlib
+            with open(episode_file, "a") as file_handle:
+                episode_content = f"\n\n***(Appended {str(date.today())})***\n\n" + episode_content
+                file_handle.write(episode_content)
             logger.info(f"Episode appended: {episode_file.name}")
