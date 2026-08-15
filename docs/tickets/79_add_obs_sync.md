@@ -108,10 +108,7 @@ those for importing
 
 ✅ Added readwise page for the raw quotes
 
-TODO
-- build append logic out
-
-    
+✅ Added append logic
 
 
 ## Reference
