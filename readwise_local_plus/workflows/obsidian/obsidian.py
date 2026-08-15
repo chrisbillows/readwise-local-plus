@@ -228,6 +228,10 @@ tags:
 
 def split_quotes(raw_quote: str) -> str:
     split_quote = raw_quote.split(". ")
+
+    if split_quote[-1][-1] == ".":
+        split_quote[-1] = split_quote[-1][:-1]
+
     return split_quote
 
 
