@@ -272,7 +272,7 @@ def split_transcript(raw: str) -> list[tuple[str, str]]:
 
 def format_hl_title(title_text: str) -> str:
     title_text = title_text.replace("**", "")
-    return "# " + title_text
+    return "## " + title_text
 
 
 def format_highlight(hl_text: HighlightFromDb) -> str:
