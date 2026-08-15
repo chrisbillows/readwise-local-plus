@@ -331,13 +331,13 @@ def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
         # b) format db metadata
         # c) add metadata to batch episode content
 
-        # 2 ---- ENSURE POD DIR EXISTS
+        # 4 ---- ENSURE POD DIR EXISTS
 
         # `podcasts` aka book.category is hardcoded for consistency
         podcast_dir = user_config.obsidian_rw_dir / "podcasts" / revised_podcast_title
         ensure_dir_exists(podcast_dir)
 
-        # 3 ---- WRITE / APPEND EPISODE CONTENT
+        # 5 ---- WRITE / APPEND EPISODE CONTENT
         episode_file = podcast_dir / (safe_episode_name + ".md")
 
         if not episode_file.exists():
