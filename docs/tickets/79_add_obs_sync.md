@@ -99,10 +99,18 @@ Q: what is splitting on "dumb" full stops doing on question marks, exclaimation 
 - question marks end up mid sentence, reads ok
 - ellipsis get chopped... annoying but worth fixing?
 
+Added handling for question marks, ellipsis and full stops...
+
+Going to keep punctuation
+
+It's still not perfect (e.g. J.D. Vance) - replace with ntlk or codex calls when we use 
+those for importing
+
 
 TODO
-- build append logic out
 - I would like to go to the readwise page for the raw quotes y'know...
+- build append logic out
+
     
 
 
