@@ -226,11 +226,31 @@ tags:
     return front_matter_template
 
 
-def split_quotes(raw_quote: str) -> str:
-    split_quote = raw_quote.split(". ")
+def split_on_punctuation(quote: str) -> list:
+    """
+    Split text on punctuation into a list of strings.
 
-    if split_quote[-1][-1] == ".":
-        split_quote[-1] = split_quote[-1][:-1]
+    Handles ellipsis, fullstops, question marks and exclaimation marks.
+
+    Parameters
+    ----------
+    quote: str
+        A paragraph of text.
+
+    Returns
+    -------
+    list
+        The original text as a list of strings.
+    """
+    # Do first, preserve ellipsis
+    quote = quote.replace("...", "...\n")
+    quote = quote.replace(". ", "\n")
+    quote = quote.replace("? ", "\n")
+
+    if quote.endswith("."):
+        quote = quote[:-1]
+
+    split_quote = quote.split("\n")
 
     return split_quote
 
@@ -262,9 +282,9 @@ def format_highlight(hl_text: HighlightFromDb) -> str:
 
     fmtd_complete_transcript = []
     for speaker, quote in transcript_by_speaker:
-        split_quote = split_quotes(quote)
+        split_quote = split_on_punctuation(quote)
         fmtd_split_quote = "".join([f"> - {str}\n" for str in split_quote])
-        fmtd_transcript = f"> [!quote] {speaker}\n{fmtd_split_quote}"
+        fmtd_transcript = f"> [!quote] **{speaker}**\n{fmtd_split_quote}"
         fmtd_complete_transcript.append(fmtd_transcript)
 
     fmtd_highlight = fmtd_title + "\n\n" + summary + "\n\n" + "\n".join(fmtd_complete_transcript) + "\n\n"
