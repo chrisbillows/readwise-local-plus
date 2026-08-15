@@ -170,42 +170,37 @@ class DbData:
 
 
 
-def obsidian_safe_filenames(file_name: str) -> str:
+def obsidian_safe_filenames_and_frontmatter(file_name: str) -> str:
     ILLEGAL_CHARS_TABLE = str.maketrans(dict.fromkeys('*"\\/<>:|?#^[]'))
     return file_name.translate(ILLEGAL_CHARS_TABLE)
 
 
 def revise_podcast_title(raw_title: str) -> str:
-    safe_title = obsidian_safe_filenames(raw_title)
+    safe_title = obsidian_safe_filenames_and_frontmatter(raw_title)
     if safe_title in PODCAST_TITLE_MAP:
         safe_title = PODCAST_TITLE_MAP[safe_title]
     return safe_title
 
-front_matter_template = """
----
-title: {{title}}
-source: {{source}}
-listened: {{listened_date}}
-created: {{created_date}}
-tags:
-- {{podcast_title}}
-- "podcast-eps"
-    ---
-"""
 
-# ('user_book_id', 60885817)
-# ('title', 'How... The Elections Were Won and Lost: Michael Heseltine')
-# ('author', 'How To Win An Election')
-# ('readable_title', 'How... The Elections Were Won and Lost: Michael Heseltine')
-# ('source', 'snipd')
-# ('unique_url', 'https://share.snipd.com/episode/2450ca8f-8fd4-422c-8640-903d5c89922e')
-# ('category', 'podcasts')
-# ('readwise_url', 'https://readwise.io/bookreview/60885817')
-# ('source_url', 'https://share.snipd.com/episode/2450ca8f-8fd4-422c-8640-903d5c89922e')
-# ('highlights', [HL(), HL(), HL(), HL(), HL(), HL()])
+def create_episode_frontmatter(
+        podcast_episode: BookFromDb, podcast_name: str, episode_name: str) -> str:
+    """
+    Create podcast frontmatter.
 
+    Parameters
+    ----------
+    podcast_episode: BookFromDb
+        The podcast episode object from the database.
+    podcast_name: str
+        The Obsidian safe, user revised podcast name.
+    episode_name: str
+        The Obsidian safe episode name.
 
-def create_episode_frontmatter(podcast_episode: BookFromDb, revised_title: str) -> str:
+    Returns
+    -------
+    str
+        The front matter block as a string with newlines.
+    """
 
     front_matter_template = """---
 title: {{title}}
@@ -219,11 +214,11 @@ tags:
 """
 
     template_replacements = {
-        "{{title}}": podcast_episode.title,
+        "{{title}}": episode_name,
         "{{listened_date}}": str(podcast_episode.highlights[0].created_at.date()),
         "{{source}}": podcast_episode.source_url,  # snipd url
         "{{created_date}}": str(date.today()),
-        "{{podcast_title}}": revised_title.lower().replace(" ", "-"),
+        "{{podcast_title}}": podcast_name.lower().replace(" ", "-"),
     }
 
     for placeholder, value in template_replacements.items():
@@ -309,12 +304,13 @@ def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
 
         raw_podcast_title = podcast_episode.author
         revised_podcast_title = revise_podcast_title(raw_podcast_title)
+        safe_episode_name = obsidian_safe_filenames_and_frontmatter(podcast_episode.title)
 
         # create podcast dir after no errors in content
         # 1 ---- CREATE EPISODE FILE CONTENT
 
         episode_front_matter = create_episode_frontmatter(
-            podcast_episode, revised_podcast_title
+            podcast_episode, revised_podcast_title, safe_episode_name
         )
         
         batch_episode_content = []
@@ -332,17 +328,12 @@ def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
 
         # 2 ---- ENSURE POD DIR EXISTS
 
-        raw_podcast_title = podcast_episode.author
-        revised_podcast_title = revise_podcast_title(raw_podcast_title)
-
         # `podcasts` aka book.category is hardcoded for consistency
         podcast_dir = user_config.obsidian_rw_dir / "podcasts" / revised_podcast_title
         ensure_dir_exists(podcast_dir)
 
         # 3 ---- WRITE / APPEND EPISODE CONTENT
-
-        episode_name = obsidian_safe_filenames(podcast_episode.title) + ".md"
-        episode_file = podcast_dir / episode_name
+        episode_file = podcast_dir / (safe_episode_name + ".md")
 
         if not episode_file.exists():
             # file create logic
