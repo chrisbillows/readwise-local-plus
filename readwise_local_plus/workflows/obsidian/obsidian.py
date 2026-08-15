@@ -205,6 +205,7 @@ def create_episode_frontmatter(
     front_matter_template = """---
 title: {{title}}
 source: {{source}}
+readwise_url: {{rw_url}}
 listened: {{listened_date}}
 created: {{created_date}}
 tags:
@@ -215,8 +216,9 @@ tags:
 
     template_replacements = {
         "{{title}}": episode_name,
-        "{{listened_date}}": str(podcast_episode.highlights[0].created_at.date()),
         "{{source}}": podcast_episode.source_url,  # snipd url
+        "{{rw_url}}": podcast_episode.readwise_url,
+        "{{listened_date}}": str(podcast_episode.highlights[0].created_at.date()),
         "{{created_date}}": str(date.today()),
         "{{podcast_title}}": podcast_name.lower().replace(" ", "-"),
     }

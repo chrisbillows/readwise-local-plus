@@ -108,7 +108,7 @@ those for importing
 
 
 TODO
-- I would like to go to the readwise page for the raw quotes y'know...
+- Add readwise page for the raw quotes
 - build append logic out
 
     
