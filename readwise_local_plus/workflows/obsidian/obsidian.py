@@ -244,8 +244,8 @@ def split_on_punctuation(quote: str) -> list:
     """
     # Do first, preserve ellipsis
     quote = quote.replace("...", "...\n")
-    quote = quote.replace(". ", "\n")
-    quote = quote.replace("? ", "\n")
+    quote = quote.replace(". ", ".\n")
+    quote = quote.replace("? ", "?\n")
 
     if quote.endswith("."):
         quote = quote[:-1]
