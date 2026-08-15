@@ -260,14 +260,15 @@ def format_highlight(hl_text: HighlightFromDb) -> str:
 
     transcript_by_speaker = split_transcript(transcript)
 
+    fmtd_complete_transcript = []
     for speaker, quote in transcript_by_speaker:
         split_quote = split_quotes(quote)
         fmtd_split_quote = "".join([f"> - {str}\n" for str in split_quote])
-
         fmtd_transcript = f"> [!quote] {speaker}\n{fmtd_split_quote}"
+        fmtd_complete_transcript.append(fmtd_transcript)
 
-    fmtd_highlight = fmtd_title + "\n\n" + summary + "\n\n" + fmtd_transcript + "\n\n"
-     
+    fmtd_highlight = fmtd_title + "\n\n" + summary + "\n\n" + "\n".join(fmtd_complete_transcript) + "\n\n"
+
     return fmtd_highlight
 
 
