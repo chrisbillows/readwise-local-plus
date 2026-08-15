@@ -806,3 +806,23 @@ class RoamKnownPage(Base):
 
     def __repr__(self) -> str:
         return f"RoamKnownPage(page_uid={self.page_uid!r})"
+
+
+class SnipdMetadata(Base):
+    """Podcast episode metadata from snipd webpages"""
+
+    __tablename__ = "snipd_metadata"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    book_id: Mapped[int] = mapped_column(
+        ForeignKey("books.user_book_id"), nullable=False
+        )
+    batch_id: Mapped[int] = mapped_column(
+        ForeignKey("readwise_batches.id"), nullable=False
+    )
+
+    # stored as a combined strings split with space e.g. a sentence should end '. '.
+    # use nltk for sentence splitting on output
+    show_notes: Mapped[str] = mapped_column
+    #store a string split by newlines
+    chapters: Mapped[str] = mapped_column

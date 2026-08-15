@@ -11,6 +11,7 @@ authors = [
 description = "Your Readwise highlights, local and with superpowers"
 requires-python = ">=3.10"
 dependencies = [
+    "nltk==3.9.2",
     "pydantic",
     "python-dotenv",
     "requests",
