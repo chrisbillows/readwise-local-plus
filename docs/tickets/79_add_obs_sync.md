@@ -110,8 +110,55 @@ those for importing
 
 ✅ Added append logic
 
+✅ Make snipd only - there is some old "other" podcast junk in batch 1
+
+Make work for older formats
+
 
 ## Reference
+
+CURRENT FORMAT:
+
+```bash
+**<hl heading>**
+
+- <bullet point 1>
+- <bullet point 2>
+
+Transcript:
+<speaker>
+<quote>
+```
+
+
+OLDER FORMATS:
+
+1 - without key takeaways
+
+```bash
+<hl heading>
+
+Transcript:
+<speaker>
+<quote>
+```
+
+2 - with key takeaways
+
+```bash
+<hl heading>
+
+Key takeaways:
+- <bullet 1>
+- ...
+- <bullet x>
+
+Transcript:
+<speaker>
+<quote>
+```
+
+
 
 Book Object contents:
 

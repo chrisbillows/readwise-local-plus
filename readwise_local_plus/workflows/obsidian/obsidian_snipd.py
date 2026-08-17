@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, date
 import logging
 from typing import Any
+import os
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -95,7 +96,7 @@ class DbData:
             select(Highlight)
             .join(Highlight.book)
             .where(
-                Highlight.batch_id == self.batch_id,
+                # Highlight.batch_id == self.batch_id,
                 Book.category.in_(["podcasts"]),
                 Book.source.is_("snipd"),
                 Highlight.is_discard.is_(False),
@@ -169,10 +170,10 @@ class DbData:
 # --- WIP stuff figuring out processing steps ---
 # ----  Makes most sense as a method on BookFromDb or HighlightFromDb? ---
 
-
-
 def obsidian_safe_filenames_and_frontmatter(file_name: str) -> str:
     ILLEGAL_CHARS_TABLE = str.maketrans(dict.fromkeys('*"\\/<>:|?#^[]'))
+    if len(file_name) > 100:
+        file_name = file_name[:100] 
     return file_name.translate(ILLEGAL_CHARS_TABLE)
 
 
@@ -250,16 +251,34 @@ def split_on_punctuation(quote: str) -> list:
     quote = quote.replace(". ", ".\n")
     quote = quote.replace("? ", "?\n")
 
-    if quote.endswith("."):
-        quote = quote[:-1]
-
     split_quote = quote.split("\n")
 
     return split_quote
 
 
 def split_transcript(raw: str) -> list[tuple[str, str]]:
-    raw = raw[12:]
+    """
+    Split transcript section of a highlight by speaker.
+
+    Quotes expected to be formatted as:
+
+    ```
+    <speaker>
+    <quote>
+    ```
+
+    Parameters
+    ----------
+    raw : str
+        The speakers section of a highlight. Assumes text was split on 'Transcript:' 
+        therefore begins with a newline. Assumes quotes follow the format above.
+            
+    Returns
+    -------
+    list[tuple[str, str]]
+        A list of tuples in the form [(<speaker>, <quote>), (<speaker>, <quote>)]
+    """
+    raw = raw[1:]
     raw = raw.replace("\n\n", "\n")
     raw = list(raw.split("\n"))
 
@@ -271,16 +290,7 @@ def split_transcript(raw: str) -> list[tuple[str, str]]:
     return transcript_by_speaker
 
 
-def format_hl_title(title_text: str) -> str:
-    title_text = title_text.replace("**", "")
-    return "## " + title_text
-
-
-def format_highlight(hl_text: HighlightFromDb) -> str:
-    title, summary, transcript = hl_text.split("\n\n", 2)
-
-    fmtd_title = format_hl_title(title)
-
+def format_transcript_hl_quotes(transcript: str) -> str:
     transcript_by_speaker = split_transcript(transcript)
 
     fmtd_complete_transcript = []
@@ -290,9 +300,7 @@ def format_highlight(hl_text: HighlightFromDb) -> str:
         fmtd_transcript = f"> [!quote] **{speaker}**\n{fmtd_split_quote}"
         fmtd_complete_transcript.append(fmtd_transcript)
 
-    fmtd_highlight = fmtd_title + "\n\n" + summary + "\n\n" + "\n".join(fmtd_complete_transcript) + "\n\n"
-
-    return fmtd_highlight
+    return fmtd_complete_transcript
 
 
 def get_batch_highlights(batch_id: int) -> dict[int, BookFromDb]:
@@ -320,30 +328,299 @@ def ensure_readwise_dirs(
         ensure_dir_exists(expected_path, True)        
 
 
+def highlight_format_type(hl: HighlightFromDb) -> str:
+    """
+    Return highlight format type.
+
+    Types are `'transcript'`, `'episode-ai-notes'`. `'do-not-process'`
+    indicates oddities we do not process.
+    
+    Parameters
+    ----------
+    hl : HighlightFromDB
+        An extracted highlight
+    
+    Returns
+    -------
+    str
+        A string indicating the highlight type.
+    """
+    if "Transcript:" in hl.text and "Episode AI notes" in hl.text:
+        warning_msg = (
+            "Highlight id: " +
+            str(hl.id) +
+            " in book id: " +
+            str(hl.user_book_id) +
+            " has 'Transcript:' and 'Episode AI notes:' strs. Did not process."
+            )
+        logger.warning(warning_msg)
+        return "do-not-process"
+    
+    if "Transcript:" in hl.text:
+        return "transcript"
+
+    elif "Episode AI notes" in hl.text:
+        return "episode-ai-notes"
+
+    else:
+        return "do-not-process"
+
+
+def format_transcript_hl_title(hl_title: str) -> str:
+    """
+    Format a string as a transcript highlight title.
+    """
+    # Use first bullet as title
+    hl_title = hl_title.replace("--", "")
+    hl_title = hl_title.replace("**", "")
+
+    if hl_title.startswith("-"):
+        hl_title = hl_title[1:]
+
+    return "## " + hl_title
+
+
+def make_bullets(split_body: list[str], split_body_type: str) -> list[str]:
+    """
+    Add dashes to the start of a list of strings.
+    """
+    bullet_body = []
+    for s in split_body:
+        bullet_s = '- ' + s
+        if split_body_type == "summary":
+            bullet_s += "."
+        bullet_body.append(bullet_s)
+    return bullet_body
+
+
+def process_transcript_hl_body(hl_body, hl_body_type) -> str:
+    """
+    Take a transcript highlight body and convert it to a writable string.
+
+    Conversion depends on highlight body type.
+
+    Parameters
+    ----------
+    hl_body : list[str]
+        The summary section of a highlight, as a list of strings.
+    hl_body_type: str
+        The highlight body type
+
+    Returns
+    -------
+    str
+        The list of strings, formatted for writing, usually as a bullets seperated by
+        newlines.
+    """
+    match hl_body_type:
+        case "no-body":
+            return ""
+        case "bullets":
+            return "\n".join(hl_body)
+        case "summary":
+            hl_body = [s for s in hl_body if s != "Summary:"]
+            bullet_body = make_bullets(hl_body, hl_body_type)
+            return "\n".join(bullet_body)
+        case "single-block":
+            split_body = hl_body[0].split(". ")
+            bullet_body = make_bullets(hl_body, hl_body_type)
+            return "\n".join(bullet_body)
+        case "multi-line":
+            bullet_body = make_bullets(hl_body, hl_body_type)
+            return "\n".join(bullet_body)
+        case _:
+            print(hl_body)
+            raise
+
+
+def transcript_hl_body_type(hl_body: list[str]) -> str:
+    """
+    Return the 'type' of a transcript highlight body.
+    """
+    if len(hl_body) == 0:
+        return "no-body"
+
+    elif hl_body[0].startswith('-'):
+        return "bullets"
+
+    elif "Summary:" in hl_body:
+        return "summary"
+
+    elif len(hl_body) == 1:
+        return "single-block"
+
+    elif len(hl_body) > 1:
+        return "multi-line"
+
+    else:
+        logger.warning("ODD BLOCK BRO!")
+
+
+def split_transcript_hl_summary(summary: str) -> tuple[str, list[str]]:
+    """
+    Split a transcript highlight summary into a `title` and `body`.
+
+    Returns
+    -------
+    tuple
+        Where the first item is the highlight title as a string, and then 
+        second item is the summary bullet points as a list of strings.
+    """
+    summary = summary.replace("\n\n", "\n")
+    hl_summary_split = summary.split("\n")
+
+    hl_title = hl_summary_split[0]
+    hl_body = [s for s in hl_summary_split[1:] if s is not '']
+
+    return hl_title, hl_body
+
+
+def clean_transcript_hl_text(hl_text: str) -> str:
+    """
+    Initial clean of a transcript highlight's text.
+    """
+    # Remove the 'Key takeaways' str. Fmt otherwise is std bullets.
+    text = hl_text.replace("Key takeaways:", "")
+    # Make non-std bullets std.
+    text = text.replace("•", "-")
+    text = text.replace("*", "-")
+    return text
+
+
+def process_transcript_hl(hl: HighlightFromDb) -> str:
+    """
+    Process a transcript highlight (i.e. a highlight with the text 'Transcript':).
+
+    Transcript highlights are split into two parts:
+        - `summary` and `quotes`
+    
+    The `summary` is then split into:
+        - `hl_header` and `hl_body`
+         
+    Returns
+    -------
+    str
+        The recombined, formatted highlight as a writeable string.
+    """
+    cleaned_text = clean_transcript_hl_text(hl.text)
+    summary, quotes = cleaned_text.split("Transcript:")
+
+    hl_title, hl_body = split_transcript_hl_summary(summary)
+    hl_body_type = transcript_hl_body_type(hl_body)
+
+    fmtd_title = format_transcript_hl_title(hl_title)
+    fmtd_body = process_transcript_hl_body(hl_body, hl_body_type)
+    fmtd_quotes = format_transcript_hl_quotes(quotes)
+    
+    fmtd_highlight = fmtd_title + "\n\n" + fmtd_body + "\n\n" + "\n".join(fmtd_quotes) + "\n\n"
+
+    return fmtd_highlight
+
+
+def print_highlight_type_stats(list_of_hls_by_book: list[dict[int, HighlightFromDb]]) -> None:
+    """
+    Print summary of highlight types.
+
+    Counts split of highlights as `transcript`, `episode ai notes` or `do not process`. And
+    counts split of transcript highlights into `nobody`, `bullets`, `summary` etc.
+    
+    """
+    count_of_transcript = 0
+    count_of_episode_ai_notes = 0
+    count_of_do_not_process = 0
+
+    count_of_nobody = 0
+    count_of_bullets = 0
+    count_of_summary = 0
+    count_of_single_block = 0
+    count_of_multi_line = 0
+
+
+    # Count highlight types
+    for podcast in list_of_hls_by_book.values():
+        for hl in podcast.highlights:
+            hl_type = highlight_format_type(hl) 
+            if hl_type == 'transcript':
+                count_of_transcript += 1
+
+                hl_body_type = ""
+
+                match hl_body_type:
+                        case "no-body":
+                            count_of_nobody += 1
+                        case "bullets":
+                            count_of_bullets += 1
+                        case "summary":
+                            count_of_summary += 1
+                        case "single-block":
+                            count_of_single_block += 1
+                        case "multi-line":
+                            count_of_multi_line += 1
+
+            elif 'episode-ai-notes': 
+                count_of_episode_ai_notes += 1
+            elif hl_type == 'do-not-process':
+                count_of_do_not_process += 1            
+
+    print("TYPES OF HIGHLIGHT:")
+    print(f"  {count_of_transcript:7} - Contain str 'Transcript:'")
+    print(f"  {count_of_episode_ai_notes:7} - Contain str 'Episode AI Notes:'")
+    print(f"  {count_of_do_not_process:7} - Oddities we do not process")
+    total_highlights = (
+        count_of_transcript + count_of_episode_ai_notes + count_of_do_not_process
+    )
+    print(f"  {total_highlights:7} - TOTAL HIGHLIGHTS COUNTED\n\n")
+
+    print("TYPES OF TRANSCRIPT_HIGHLIGHT_BODY")
+    print(f"  {count_of_nobody:7} - Empty body")
+    print(f"  {count_of_bullets:7} - Bullets")
+    print(f"  {count_of_summary:7} - Summary")
+    print(f"  {count_of_single_block:7} - Single block")
+    print(f"  {count_of_multi_line:7} - Multi-line")
+    total_ts_highlights = (
+        count_of_nobody + count_of_bullets + count_of_summary + count_of_single_block +
+        count_of_multi_line
+    )
+    print(f"  {total_ts_highlights:7} - TOTAL TRANSCRIPT HIGHLIGHTS COUNTED\n\n")
+
+
 def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
     """Entry point function to write a batch of highlights to Obsidian."""
     ensure_readwise_dirs(user_config)
     batch_highlights = get_batch_highlights(batch_id)
 
-    # each `Book` obj is a podcast_episode
+    print_highlight_type_stats(batch_highlights)
+
+    # each `BookFromDb` obj is a podcast_episode
     for user_book_id, podcast_episode in batch_highlights.items():
 
         # 0 ---- CREATE GENERAL VARS
 
         raw_podcast_title = podcast_episode.author
         revised_podcast_title = revise_podcast_title(raw_podcast_title)
-        safe_episode_name = obsidian_safe_filenames_and_frontmatter(podcast_episode.title)
+        safe_podcast_title = obsidian_safe_filenames_and_frontmatter(podcast_episode.title)
 
         # create podcast dir after no errors in content
         # 1 ---- CREATE EPISODE FILE CONTENT
 
         episode_front_matter = create_episode_frontmatter(
-            podcast_episode, revised_podcast_title, safe_episode_name
+            podcast_episode, revised_podcast_title, safe_podcast_title
         )
         
         episode_content = []
+
         for hl in podcast_episode.highlights:
-            fmtd_hl = format_highlight(hl.text)
+            hl_type = highlight_format_type(hl)
+            match hl_type:
+                case "transcript":
+                    fmtd_hl = process_transcript_hl(hl)
+                case "episode-ai-notes":
+                    fmtd_hl = ""
+                case "do-not-process":
+                    pass
+                case _:
+                    msg = f"WARNING: Highlight ID: {hl.id} is of unknown type. Not processed."
+                    logger.warning(msg)
             episode_content.append(fmtd_hl)
 
         episode_content = "".join(episode_content)
@@ -363,7 +640,7 @@ def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
         ensure_dir_exists(podcast_dir)
 
         # 5 ---- WRITE / APPEND EPISODE CONTENT
-        episode_file = podcast_dir / (safe_episode_name + ".md")
+        episode_file = podcast_dir / (safe_podcast_title + ".md")
 
         if not episode_file.exists():
             # file create logic
@@ -371,7 +648,7 @@ def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
             logger.info(f"Episode created:: {episode_file.name}")
         else:
             # file append logic
-            # Use open as cannot append with pathlib
+            # Use `open` as cannot append with pathlib
             with open(episode_file, "a") as file_handle:
                 episode_content = f"\n\n***(Appended {str(date.today())})***\n\n" + episode_content
                 file_handle.write(episode_content)
