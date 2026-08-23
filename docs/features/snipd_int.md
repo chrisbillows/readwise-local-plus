@@ -45,7 +45,7 @@ readwise_local_plus/
 - processing logic
     - figure out formatting db output
 
-Details [here](../tickets/79_add_obs_sync.md)
+Details [here](../tickets/79_1_add_obs_sync.md)
 
 ### Phase 2 / ticket 81 - capture additional metadata
 
