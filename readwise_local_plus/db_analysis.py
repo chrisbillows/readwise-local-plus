@@ -169,6 +169,17 @@ class DbHlsAnalysis:
         return len(self.snipd_location_duplicates_by_snipd_url)
 
 #--------------------------------------------------------------------------------------------------------------------------
+    def print_properties(self):
+        """
+        Print the available properites.
+
+        Helper function to check all properties. Useful as module is
+        structured with properties followed by the method that
+        generates the objects the property is calculated on.
+        """
+        for name, prop in inspect.getmembers(type(self), lambda x: isinstance(x, property)):
+            print("---")
+            print(prop.fget.__name__)
 
     def print_analysis(self):
         """
@@ -214,38 +225,82 @@ class DbHlsAnalysis:
         """
         for book in self.dbhls.hls_by_book:
 
-            self._generate_snipd_book_duplicates(book)
+            self._generate_snipd_episode_stats(book)
             self._generate_snipd_book_url_mismatch_stats(book)
 
             for hl in book.highlights:
 
-                self._generate_snipd_hl_stats(hl)
-                self._generate_snipd_hl_date_stats(hl)
-                self._generate_snipd_hl_url_stats(hl)
+                self._generate_snipd_hl_missing_location_stats(hl)
+                self._generate_snipd_hl_missing_date_stats(hl)
+                self._generate_snipd_hl_missing_url_stats(hl)
 
     def _all_snipd_stats_on_hls_by_snipd_url(self):
         """
         Genearate stats created by looping over `self.hls_by_snipd_url`.
         """    
         for snipd_episode in self.dbhls.hls_by_snipd_url:
-            self._generate_snipd_unique_book_counts(snipd_episode)
+            self._generate_snipd_unique_episode_book_counts(snipd_episode)
             self._analyse_hl_snipd_urls(snipd_episode)
             self._group_snipd_episode_hls_by_location(snipd_episode)
             self._group_snipd_episode_hls_by_location_and_highlighted_at_and_missing_locations(snipd_episode)
 
-
-    def _generate_snipd_book_duplicates(self, book: BookFromDb) -> None:
-            """
-            Count unique snipd episodes.
+#----------- SORT BY PROPERTY AND METHOD THAT GENERATES STATS FOR PROPERTY  ---------
     
-            TODO: duplicate_book_ids is only the "second" book, arbitrarily,
-            TODO: depending on the sort used. If books are sorted, then 
-            TODO: this is probably fine.
-            """
-            if book.source_url in self.snipd_book_urls:
-                self.snipd_duplicate_book_ids.append(book.user_book_id)
-            else:
-                self.snipd_book_urls.append(book.source_url)
+    # Property requires no generator method
+    @property
+    def snipd_episodes(self) -> None:
+        """
+        Total Snipd highlights:
+        """
+        count = sum(
+            len(book.highlights) for book in self.dbhls.hls_by_book
+            if book.source == "snipd"
+            ) 
+        return count
+
+    # Property requires not generator method
+    @property
+    def snipd_highlights(self) -> int:
+        """
+        Total Snipd podcast episodes:
+        """
+        return len(self.dbhls.hls_by_book_dict)
+
+
+    @property
+    def snipd_unique_episodes(self) -> int:
+        """
+        Total unique snipd urls/podcast episodes:
+        """
+        return len(self.snipd_book_urls)
+
+    @property
+    def snipd_duplicate_episodes(self) -> int:
+        """
+        Total duplicate books (i.e. books duplicating pre-existing snipd url):
+        """
+        return len(self.snipd_duplicate_book_ids)
+
+    def _generate_snipd_episode_stats(self, book: BookFromDb) -> None:
+        """
+        Count unique snipd episodes.
+
+        TODO: duplicate_book_ids is only the "second" book, arbitrarily,
+        TODO: depending on the sort used. If books are sorted, then 
+        TODO: this is probably fine.
+        """
+        if book.source_url in self.snipd_book_urls:
+            self.snipd_duplicate_book_ids.append(book.user_book_id)
+        else:
+            self.snipd_book_urls.append(book.source_url)
+
+
+    @property
+    def snipd_url_mismatches(self) -> int:
+        """
+        Total snipd books where `source_url` and `unique_url` are different.
+        """
+        return self.snipd_books_url_mismatch
 
     def _generate_snipd_book_url_mismatch_stats(self, book: BookFromDb) -> None:
         """
@@ -253,8 +308,23 @@ class DbHlsAnalysis:
         """
         if book.source_url != book.unique_url:
             self.snipd_books_url_mismatch += 1
-    
-    def _generate_snipd_hl_stats(self, hl: HighlightFromDb) -> None:
+
+
+    @property
+    def snipd_hls_missing_location(self) -> int:
+        """
+        Total snipd hls missing a `location` field.
+        """
+        return len(self.snipd_hls_no_location)
+
+    @property
+    def snipd_hls_missing_location_ai_notes(self) -> int:
+        """
+        Total snipd hls missing a `location` field that are definitely 'Episode AI Notes':
+        """
+        return len(self.snipd_hls_no_location_ai_notes)
+
+    def _generate_snipd_hl_missing_location_stats(self, hl: HighlightFromDb) -> None:
         """
         Count snipd hls missing `location`.
 
@@ -266,23 +336,61 @@ class DbHlsAnalysis:
             if hl.text.startswith("Episode AI notes"):
                 self.snipd_hls_no_location_ai_notes.append(hl)
 
-    def _generate_snipd_hl_date_stats(self, hl: HighlightFromDb) -> None:
+
+    @property
+    def snipd_hls_missing_highlighted_at_date(self) -> int:
+        """
+        Total snipd hls missing a `highlighted_at` field.
+        """
+        return len(self.snipd_hls_no_highlighted_at)
+
+    @property
+    def snipd_hls_missing_created_at_date(self) -> int:
+        """
+        Total snipd hls missing a `created_at` field.
+        """
+        return len(self.snipd_hls_no_created_at)
+
+    def _generate_snipd_hl_missing_date_stats(self, hl: HighlightFromDb) -> None:
         """
         Count hls missing `highlighted_at` or `created_at`.
         """
-        if not hl.created_at:
-            self.snipd_hls_no_created_at.append(hl)
         if not hl.highlighted_at:
             self.snipd_hls_no_highlighted_at.append(hl)
+        if not hl.created_at:
+            self.snipd_hls_no_created_at.append(hl)
 
-    def _generate_snipd_hl_url_stats(self, hl: HighlightFromDb) -> None:
+
+    @property
+    def snipd_hls_missing_snipd_url(self) -> int:
+        """
+        Total hls missing a snipd hl `url` (distinct from snipd podcast url):
+        """
+        return len(self.snipd_hls_no_snipd_url)
+
+    def _generate_snipd_hl_missing_url_stats(self, hl: HighlightFromDb) -> None:
         """
         Count hls missing a snipd hl `url` (distinct from snipd podcast url).
         """
         if not hl.url:
             self.snipd_hls_no_snipd_url.append(hl)
 
-    def _generate_snipd_unique_book_counts(self, snipd_episode: SnipdEpisodeFromDb):
+
+    @property
+    def snipd_unique_episode_book_counts(self) -> str:
+        """
+        Counts of total books per unique snipd url. (i.e. number of duplicate books).
+        """
+        result = "\n"
+        for num_of_episodes, num_of_books in sorted(self.snipd_episode_book_counts.items()):
+            result += (f"{num_of_episodes} episodes duplicated in {num_of_books} books\n")
+
+        total_books = sum([(k * v) for k, v in self.snipd_episode_book_counts.items()])
+        result += f"\nTotal snipd books: {total_books}"
+
+        return result
+
+    def _generate_snipd_unique_episode_book_counts(self, snipd_episode: SnipdEpisodeFromDb):
         book_count = len(snipd_episode.books)
         current_tally = self.snipd_episode_book_counts.get(book_count)
 
@@ -290,6 +398,14 @@ class DbHlsAnalysis:
             self.snipd_episode_book_counts[book_count] = current_tally + 1
         else:
             self.snipd_episode_book_counts[book_count] = 1
+
+
+    @property
+    def snip_highlighted_at_mismatch_hl_url(self) -> int:
+        """
+        Total Hls with matching `highlighted_at` but different <snip> url:
+        """
+        return len(self.snipd_hls_url_hl_at_mismatch)
 
     def _analyse_hl_snipd_urls(self, snipd_episode: SnipdEpisodeFromDb) -> None:
         """
@@ -322,101 +438,6 @@ class DbHlsAnalysis:
             else:
                 if tracker[hl.highlighted_at] != hl.url:
                     self.snipd_hls_url_hl_at_mismatch.append(hl)
-
-    @property
-    def snip_highlighted_at_mismatch_hl_url(self) -> int:
-        """
-        Total Hls with matching `highlighted_at` but different <snip> url:
-        """
-        return len(self.snipd_hls_url_hl_at_mismatch)
-
-    @property
-    def snipd_highlights(self) -> int:
-        """
-        Total Snipd podcast episodes:
-        """
-        return len(self.dbhls.hls_by_book_dict)
-    
-    @property
-    def snipd_episodes(self) -> None:
-        """
-        Total Snipd highlights:
-        """
-        count = sum(
-            len(book.highlights) for book in self.dbhls.hls_by_book
-            if book.source == "snipd"
-            ) 
-        return count
-
-    @property
-    def snipd_duplicate_episodes(self) -> int:
-        """
-        Total duplicate books (i.e. books duplicating pre-existing snipd url):
-        """
-        return len(self.snipd_duplicate_book_ids)
-
-    @property
-    def snipd_unique_episodes(self) -> int:
-        """
-        Total unique snipd urls/podcast episodes:
-        """
-        return len(self.snipd_book_urls)
-
-    @property
-    def snipd_url_mismatches(self) -> int:
-        """
-        Total snipd books where `source_url` and `unique_url` are different.
-        """
-        return self.snipd_books_url_mismatch
-
-    @property
-    def snipd_hls_missing_location(self) -> int:
-        """
-        Total snipd hls missing a `location` field.
-        """
-        return len(self.snipd_hls_no_location)
-
-    @property
-    def snipd_hls_missing_location_ai_notes(self) -> int:
-        """
-        Total snipd hls missing a `location` field that are definitely 'Episode AI Notes':
-        """
-        return len(self.snipd_hls_no_location_ai_notes)
-
-    @property
-    def snipd_hls_missing_highlighted_at_date(self) -> int:
-        """
-        Total snipd hls missing a `highlighted_at` field.
-        """
-        return len(self.snipd_hls_no_highlighted_at)
-
-    @property
-    def snipd_hls_missing_created_at_date(self) -> int:
-        """
-        Total snipd hls missing a `created_at` field.
-        """
-        return len(self.snipd_hls_no_created_at)
-
-    @property
-    def snipd_hls_missing_snipd_url(self) -> int:
-        """
-        Total hls missing a snipd hl `url` (distinct from snipd podcast url):
-        """
-        return len(self.snipd_hls_no_snipd_url)
-
-    @property
-    def snipd_unique_episode_book_counts(self) -> str:
-        """
-        Counts of total books per unique snipd url. (i.e. number of duplicate books).
-        """
-        result = "\n"
-        for num_of_episodes, num_of_books in sorted(self.snipd_episode_book_counts.items()):
-            result += (f"{num_of_episodes} episodes duplicated in {num_of_books} books\n")
-
-        total_books = sum([(k * v) for k, v in self.snipd_episode_book_counts.items()])
-        result += f"\nTotal snipd books: {total_books}"
-
-        return result
 
 
 def duplicate_hls_have_identical_highlighted_at(
