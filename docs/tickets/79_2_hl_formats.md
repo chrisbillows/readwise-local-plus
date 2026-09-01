@@ -49,11 +49,8 @@ Therefore, we will now split hl.text on `'Transcript:'`
 For the 299 highlights **without** `'Transcript:'`
     - almost all are `"Episode AI notes"`
     - These can be formatted as standalone
-    - Basic example:
+    - [Basic Episode AI Notes example](79_examples.md#episode-ai-notes-example)
 
-```
-"Episode AI notes\n\n1. The speaker finds humor in Donald Trump's unconventional and sometimes rambling delivery, highlighting his comic timing and campy nature.\n\n2. A politician receives strong support from white evangelicals by tapping into an old American tradition of carnival, circus, and preacher-like charisma reminiscent of iconic figures like Billy Graham."
-```
 
 ## How to process the pre `"Transcript:"` text?
 
@@ -76,84 +73,12 @@ The rest of the text then becomes a list of split lines.
 
 We can make bullets uniform by replacing '•' and '*' with the currently used '-' 
 
-#### Examples
+There are five types: 
+- no-body
+- bullets
+- summary 
+- single block
+- multiline 
 
-These are the types of body:
+[Summary text types - examples](79_examples.md#summary-text-types-examples)
 
-##### no-body
-```python
-if len(hl_body) == 0:
-```
-
-[]
-
-##### bullets
-```python
-elif hl_body[0].startswith('-'):
-``` 
-[
-  '- Membership to our chat community is available on therestispolitics.com', 
-  '- Listeners on Apple Podcast can easily subscribe for early access and ad free listening', 
-  '- The hosts are Alistair Campbell and Rory Stewart', 
-  '- Alistair Campbell is in Cape Cod, United States', 
-  '- A tennis racket can be seen on the wall behind Alistair', 
-  '- The tennis racket is old and has been used for a long time', 
-  '- Alistair traveled on a tiny plane to reach his current location'
-]
-
-##### summary
-```python    
-elif "Summary:" in hl_body:
-```
-
-[
-  'The central question is what mix of data sets should you use?', 
-  'There are various considerations, such as different data sources, the importance of repetition (quality vs quantity), and the definition of good quality data. The belief that code or spending time on good sources like Wikipedia improves models lacks evidence.', 
-  'Different data mixes yield varied results, with C4 dataset performing exceptionally well despite its problematic pre-processing.', 
-  'Evaluating models for generation tasks is challenging, as there is uncertainty about what to measure.', 
-  'Making reasonable choices based on evaluation becomes crucial.'
-]
-
-##### single-block
-```python
-elif len(hl_body) == 1:
-```
-[
-  'The conversation highlights the roles and backgrounds of Pablo Alino and Matt Wysnisky, who are involved in Python community projects and work at Bloomberg. They discuss the use of profilers in Python, specifically C profile and profile from the standard library.'
-]
-
-##### multiline
-```python
-elif len(hl_body) > 1:
-```
-
-[
-  'The podcast episode discusses several interconnected long-term trends that have profoundly shaped modern society, starting from the Industrial Revolution.', 
-  
-  '--The Industrial Revolution and its ripple effects:--', 
-  
-  '- The Industrial Revolution, beginning in the late 18th century, was fundamentally an energy revolution that transformed economies and work patterns. It led to a massive migration to cities, increased wealth, and advancements in medicine that drastically reduced child and maternal mortality. ',
-  
-  '- This, in turn, enabled women to enter the workforce, altering family structures, birth rates, and the overall nature of the economy. ', 
-  
-  "- Fewer children dying and women's increased participation in the workforce contributed to an aging population. This is a challenge because fewer working-age people support an increasing elderly population. ",
-  
-  '- The rise of the contraceptive pill further impacted fertility rates, giving women more control over family planning. ', 
-  
-  "- Automation of household tasks also played a part in women's increased participation in the labor market. ",
- 
-  '--Globalization and its consequences:--', 
-  
-  '- Globalization, particularly the free movement of capital and goods, led to a shift from a manufacturing-based to a service-based economy. ', 
-  
-  '- This made it more challenging for countries like the UK to compete internationally on manufacturing, forcing a focus on higher-skilled, service-based industries. ', 
-  
-  '- However, globalization also introduced increased vulnerability to global risks, such as pandemics and supply chain disruptions. ', 
-  
-  '- The increasing importance of education for success in the modern, service-based economy created a credentialist society and exacerbated social divisions. ', 
-  
-  '--The changing role of the state:--', 
-  
-  '- While globalization initially diminished the role of the state, recent events like the 2008 financial crisis and the COVID-19 pandemic have shown an increased reliance on state intervention and interventionism. ', 
-  
-  "- There's a growing expectation that the state should play a more active role in addressing social and economic challenges, yet there's simultaneous distrust in the competence of politicians."]
