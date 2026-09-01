@@ -27,6 +27,17 @@ class DbHlsAnalysis:
     """
     Methods and attributes for analysising a DbHls export.
     
+    Driver function `self.all_stats` generates stats by calling functions that 
+    loop over different groupings of Hls (e.g. by book, by snipd url, by  
+    snipd url, location and highlighted time). Stats are added as attrs to
+    the object.
+
+    Stats are most easily output by creating properties which are 
+    automatically  output via `self.print_analysis`. 
+
+    Attributes
+    ----------
+
     """
     def __init__(self, dbhls: DbHls):
         self.dbhls = dbhls
@@ -41,6 +52,7 @@ class DbHlsAnalysis:
         self.snipd_hls_no_created_at: list[HighlightFromDb] = []
         self.snipd_hls_no_snipd_url: list[HighlightFromDb] = []
         self.snipd_episode_book_counts = {}
+        self.snipd_hls_url_hl_at_mismatch: list[HighlightFromDb] = []
         #-------------------------------------
         self.snipd_hls_by_location: dict[str, dict[int, list[HighlightFromDb]]] = {}
         self.snipd_hls_by_location_and_hl_at: dict[str, dict[int, list[HighlightFromDb]]] = {}
@@ -282,40 +294,43 @@ class DbHlsAnalysis:
 
     def _analyse_hl_snipd_urls(self, snipd_episode: SnipdEpisodeFromDb) -> None:
         """
-        WIP analysis of Hl snipd url uniqueness.
-        
-        Do they do anything different than highlighted at?
+        `hl.url` behaves identically to `highlighted_at` for Hl version tracking.
+
+        List for counting, 
+
+        Iterate over all Hls from all Books for a Snipd Episode. Add unique 
+        `highlighted_at`s to a tracker. 
+
+        Hls have unique urls in the form: `https://share.snipd.com/snip/<uid>` 
+        compared to episode/books where <snip> is replaced with <episode>.
+
+        We prefer `highlighted_at` as a) it gives additional context and b)
+        a lack of confidence HL URLs are used by Snipd users, so they might
+        be removed.  (Could same be said for episode URLs...?)
         """
-        # NOTE:  seem identical to highlihghted_at
-        # NOTE: Think we prefer highlightted_at
-        # NOTE:  1 - more context
-        # NOTE:  2 - how used are these links? not much? so will they continue?
-        if len(snipd_episode.books) > 1:
-            pass
-            # print("=========BOOK==========\n\n")
-            # for hl in snipd_episode.hls:
-            #     print(hl.highlighted_at, hl.created_at, hl.url)
-            # print()
-            # breakpoint()
+        tracker = {}
+        for hl in snipd_episode.hls:
 
-         # SNIP VS URL
-        # https://share.snipd.com/snip/9042335c-cc58-4678-98c8-dc85625ee2c1
-        # https://share.snipd.com/episode/db7c3204-66c8-4d5d-a874-6892e67d82dd
+            # Add unseen `highlighted_at`s to `tracker`
+            if hl.highlighted_at not in tracker:
+                tracker[hl.highlighted_at] = hl.url
 
-        # tracker = {}
-        # mismatches = 0
-        # print("=========BOOK==========")
-        # for hl in snipd_episode.hls:
-        #     if hl.highlighted_at not in tracker:
-        #         tracker[hl.highlighted_at] = hl.url
-        #     else:
-        #         if tracker[hl.highlighted_at] == hl.url:
-        #             print("MATCHY MATCHY")
-        #         else:
-        #             mismatches += 1
-        #             print("MISSY MISSY")
-        # print("------- SUMMARY --------")
-        # print(f"{mismatches} Hls where highlighted_at matches but the urls DO NOT match")
+            # For seen,  `highlighted_at`, confirm the new hl.url matches
+            # the tracked hl's .url.
+            # NOTE: This not exact. For example, if we have 3 highlights where Hls 
+            # Nos 2/3 have a different URL to Hl 1, but they have the same url as 
+            # EACH OTHER this will be counted as 2 mismatches and not one. 
+            # This is moot while mistmatches is zero.
+            else:
+                if tracker[hl.highlighted_at] != hl.url:
+                    self.snipd_hls_url_hl_at_mismatch.append(hl)
+
+    @property
+    def snip_highlighted_at_mismatch_hl_url(self) -> int:
+        """
+        Total Hls with matching `highlighted_at` but different <snip> url:
+        """
+        return len(self.snipd_hls_url_hl_at_mismatch)
 
     @property
     def snipd_highlights(self) -> int:
@@ -404,8 +419,6 @@ class DbHlsAnalysis:
         result += f"\nTotal snipd books: {total_books}"
 
         return result
-
-    
 
 
 def display_duplicate_books_at_a_glance(
