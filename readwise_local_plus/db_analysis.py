@@ -241,7 +241,6 @@ class DbHlsAnalysis:
             TODO: duplicate_book_ids is only the "second" book, arbitrarily,
             TODO: depending on the sort used. If books are sorted, then 
             TODO: this is probably fine.
-    
             """
             if book.source_url in self.snipd_book_urls:
                 self.snipd_duplicate_book_ids.append(book.user_book_id)
@@ -296,17 +295,16 @@ class DbHlsAnalysis:
         """
         `hl.url` behaves identically to `highlighted_at` for Hl version tracking.
 
-        List for counting, 
-
         Iterate over all Hls from all Books for a Snipd Episode. Add unique 
-        `highlighted_at`s to a tracker. 
+        `highlighted_at`s to a tracker. Makes a list to count and for easy
+        future analysis (although see below note for accuracy).
 
         Hls have unique urls in the form: `https://share.snipd.com/snip/<uid>` 
         compared to episode/books where <snip> is replaced with <episode>.
 
         We prefer `highlighted_at` as a) it gives additional context and b)
         a lack of confidence HL URLs are used by Snipd users, so they might
-        be removed.  (Could same be said for episode URLs...?)
+        be removed.  (Could same be said for episode URLs...?).
         """
         tracker = {}
         for hl in snipd_episode.hls:
@@ -317,9 +315,9 @@ class DbHlsAnalysis:
 
             # For seen,  `highlighted_at`, confirm the new hl.url matches
             # the tracked hl's .url.
-            # NOTE: This not exact. For example, if we have 3 highlights where Hls 
-            # Nos 2/3 have a different URL to Hl 1, but they have the same url as 
-            # EACH OTHER this will be counted as 2 mismatches and not one. 
+            # NOTE: This not exact. For example, if we have 3 highlights where Hls
+            # Nos 2/3 have a different URL to Hl 1, but they have the same url as
+            # EACH OTHER this will be counted as 2 mismatches and not one.
             # This is moot while mistmatches is zero.
             else:
                 if tracker[hl.highlighted_at] != hl.url:
@@ -421,38 +419,12 @@ class DbHlsAnalysis:
         return result
 
 
-def display_duplicate_books_at_a_glance(
-        books_by_snipd_uid: dict[str, tuple[int, BookFromDb, str]]
-    ) -> None:
-    """
-    Quick display of duplicate book data.
-    
-    Parameters
-    ----------
-    
-
-    """
-    pass
-    # for snipd_uid, books in books_by_snipd_uid.items():
-    #     if len(books) > 1:
-    #         print("===")
-    #         for book in books:
-    #             book_id = book[0] 
-    #             book_obj: BookFromDb = book[1]
-    #             title = book[2]
-
-    #             print(book_id)
-    #             print("    ", title[:400])
-
-
-
-
-def duplicate_hls_have_identical_created_at(
+def duplicate_hls_have_identical_highlighted_at(
         books_by_snipd_uid: dict[str, tuple[int, BookFromDb, str]],
         hls_by_book: dict[int, BookFromDb],
     ) -> None:
     """
-    Do all duplicate hls have identical created times?
+    Do all duplicate hls have identical highlighted at times?
     
     Visual sampling by book for all episodes that don't match.
 
