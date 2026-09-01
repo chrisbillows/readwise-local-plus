@@ -4,6 +4,7 @@ from datetime import datetime, date
 import logging
 from typing import Any
 import os
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -11,10 +12,11 @@ from pathlib import Path
 
 from readwise_local_plus.config import UserConfig, fetch_user_config
 from readwise_local_plus.db_operations import get_session
-
+from readwise_local_plus.db_export import (
+        BookFromDb, HighlightFromDb, SnipdEpisodeFromDb, DbHls
+    )
 from readwise_local_plus.models import (
-    Book,
-    Highlight,
+    Book, Highlight,
 )
 
 
@@ -32,24 +34,25 @@ PODCAST_TITLE_MAP = {
 
 # Duplicate from chatgpt_daily_prototype - likely pull out into new module and combine
 @dataclass
-class HighlightFromDb:
+class HighlightFromDbSnipd:
     user_book_id: int
     id: int
     text: str
     note: str | None
     location: int | None
+    highlighted_at: datetime | None
     created_at: datetime | None
     updated_at: datetime | None
     url: str | None
     readwise_url: str | None
 
     def __repr__(self) -> str:
-        return f"HL()"
+        return f"HL({self.id})"
 
 
 # Duplicate from chatgpt_daily_prototype - likely pull out into new module and combine
 @dataclass
-class BookFromDb:
+class BookFromDbSnipd:
     user_book_id: int
     title: str
     author: str
@@ -60,7 +63,8 @@ class BookFromDb:
     readwise_url: str
     source_url: str
     cover_image_url: str
-    highlights: list[HighlightFromDb] = field(default_factory=list)
+    # first_hl_date: datetime
+    highlights: list[HighlightFromDbSnipd] = field(default_factory=list)
 
     def __repr__(self) -> str:
         total_highlights = len(self.highlights)
@@ -68,7 +72,7 @@ class BookFromDb:
 
 
 # Duplicate from chatgpt_daily_prototype - likely pull out into new module and combine
-class DbData:
+class DbDataSnipd:
     """
     Build daily note payload:
     dict[date] -> list[DNBook]
@@ -79,7 +83,7 @@ class DbData:
         self._session: Session = get_session(fetch_user_config().db_path)
         self.grouped = {}
 
-    def build(self) -> dict[int, BookFromDb]:
+    def build(self) -> dict[int, BookFromDbSnipd]:
         logger.info("Create payload for batch: %s", self.batch_id)
 
         rows = self._fetch()
@@ -140,7 +144,7 @@ class DbData:
 
         if not self.grouped.get(book_id):
             clean_author = self._clean_author(h.book.author) 
-            self.grouped[book_id] = BookFromDb(
+            self.grouped[book_id] = BookFromDbSnipd(
                     user_book_id=book_id,
                     title=h.book.title,
                     author=clean_author,
@@ -154,12 +158,13 @@ class DbData:
                 )
 
         self.grouped[book_id].highlights.append(
-            HighlightFromDb(
+            HighlightFromDbSnipd(
                 user_book_id=book_id,
                 id=h.id,
                 text=h.text,
                 note=h.note,
                 location=h.location,
+                highlighted_at=h.highlighted_at,
                 created_at=h.created_at,
                 updated_at=h.updated_at,
                 url=h.url,
@@ -185,7 +190,7 @@ def revise_podcast_title(raw_title: str) -> str:
 
 
 def create_episode_frontmatter(
-        podcast_episode: BookFromDb, podcast_name: str, episode_name: str) -> str:
+        podcast_episode: BookFromDbSnipd, podcast_name: str, episode_name: str) -> str:
     """
     Create podcast frontmatter.
 
@@ -303,9 +308,9 @@ def format_transcript_hl_quotes(transcript: str) -> str:
     return fmtd_complete_transcript
 
 
-def get_batch_highlights(batch_id: int) -> dict[int, BookFromDb]:
+def get_batch_highlights(batch_id: int) -> dict[int, BookFromDbSnipd]:
     """Fetch highlights for a given batch from the RW db."""
-    db_data = DbData(batch_id)
+    db_data = DbDataSnipd(batch_id)
     grouped_highlights = db_data.build()
     return grouped_highlights
 
@@ -328,7 +333,7 @@ def ensure_readwise_dirs(
         ensure_dir_exists(expected_path, True)        
 
 
-def highlight_format_type(hl: HighlightFromDb) -> str:
+def highlight_format_type(hl: HighlightFromDbSnipd) -> str:
     """
     Return highlight format type.
 
@@ -487,7 +492,7 @@ def clean_transcript_hl_text(hl_text: str) -> str:
     return text
 
 
-def process_transcript_hl(hl: HighlightFromDb) -> str:
+def process_transcript_hl(hl: HighlightFromDbSnipd) -> str:
     """
     Process a transcript highlight (i.e. a highlight with the text 'Transcript':).
 
@@ -517,7 +522,7 @@ def process_transcript_hl(hl: HighlightFromDb) -> str:
     return fmtd_highlight
 
 
-def print_highlight_type_stats(list_of_hls_by_book: list[dict[int, HighlightFromDb]]) -> None:
+def print_highlight_type_stats(list_of_hls_by_book: list[dict[int, HighlightFromDbSnipd]]) -> None:
     """
     Print summary of highlight types.
 
@@ -585,6 +590,81 @@ def print_highlight_type_stats(list_of_hls_by_book: list[dict[int, HighlightFrom
 
 
 def write_batch_to_obsidian(user_config: UserConfig, batch_id: int):
+    """Entry point function to write a batch of highlights to Obsidian."""
+    ensure_readwise_dirs(user_config)
+
+    # batch_hls_by_book = get_batch_highlights(batch_id)
+    # batch_hls_by_snipd_uid = regroup_highlights_by_snipd_uid(batch_hls_by_book)
+    db_hls = DbHls("all_snipd")
+    db_hls.populate()
+
+    # print_highlight_type_stats(batch_hls_by_book)
+
+    # each `BookFromDb` obj is a podcast_episode
+    for podcast_episode in db_hls.hls_by_snipd_url:
+        # 0 ---- CREATE GENERAL VARS
+
+        raw_podcast_title = podcast_episode.author
+        revised_podcast_title = revise_podcast_title(raw_podcast_title)
+        safe_podcast_title = obsidian_safe_filenames_and_frontmatter(podcast_episode.title)
+
+        # create podcast dir after no errors in content
+        # 1 ---- CREATE EPISODE FILE CONTENT
+
+        episode_front_matter = create_episode_frontmatter(
+            podcast_episode, revised_podcast_title, safe_podcast_title
+        )
+        
+        episode_content = []
+
+        for hl in podcast_episode.highlights:
+            hl_type = highlight_format_type(hl)
+            match hl_type:
+                case "transcript":
+                    fmtd_hl = process_transcript_hl(hl)
+                case "episode-ai-notes":
+                    fmtd_hl = ""
+                case "do-not-process":
+                    pass
+                case _:
+                    msg = f"WARNING: Highlight ID: {hl.id} is of unknown type. Not processed."
+                    logger.warning(msg)
+            episode_content.append(fmtd_hl)
+
+        episode_content = "".join(episode_content)
+
+        episode_content_and_fm = episode_front_matter + "\n" + episode_content
+
+        # 3 ---- ADD SNIPD METADATA (will come from db)
+
+        # a) pull metadata from db
+        # b) format db metadata
+        # c) add metadata to batch episode content
+
+        # 4 ---- ENSURE POD DIR EXISTS
+
+        # `podcasts` aka book.category is hardcoded for consistency
+        podcast_dir = user_config.obsidian_rw_dir / "podcasts" / revised_podcast_title
+        ensure_dir_exists(podcast_dir)
+
+        # 5 ---- WRITE / APPEND EPISODE CONTENT
+        episode_file = podcast_dir / (safe_podcast_title + ".md")
+
+        if not episode_file.exists():
+            # file create logic
+            episode_file.write_text(episode_content_and_fm)
+            logger.info(f"Episode created:: {episode_file.name}")
+        else:
+            # file append logic
+            # Use `open` as cannot append with pathlib
+            with open(episode_file, "a") as file_handle:
+                episode_content = f"\n\n***(Appended {str(date.today())})***\n\n" + episode_content
+                file_handle.write(episode_content)
+            logger.info(f"Episode appended: {episode_file.name}")
+
+
+
+def write_batch_to_obsidian_DO_NOT_CHANGE(user_config: UserConfig, batch_id: int):
     """Entry point function to write a batch of highlights to Obsidian."""
     ensure_readwise_dirs(user_config)
     batch_highlights = get_batch_highlights(batch_id)
