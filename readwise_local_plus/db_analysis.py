@@ -23,6 +23,16 @@ from readwise_local_plus.models import (
 logger = logging.getLogger(__name__)
 
 
+def ordered_property(order):
+    """
+    Decorator to order class properties.
+    """
+    def decorator(func):
+        func.order = order
+        return property(func)
+    return decorator
+
+
 class DbHlsAnalysis:
     """
     Methods and attributes for analysising a DbHls export.
@@ -63,6 +73,52 @@ class DbHlsAnalysis:
 
 #--------------------------------------------------------------------------------------------------------------------------
 
+    @ordered_property(130)
+    def snipd_duplicate_locations_from_hls_by_location(self):
+        """
+        13. Total unique HLs duplicating location (i.e. same location, different `highlighted_at`) METHOD 1:
+        >>> WHY DOESN'T THIS MATCH METHOD 2???
+        """
+        duplicate_locations = 0
+        for eps_hls_by_location in self.snipd_hls_by_location.values():
+            for location, hls in eps_hls_by_location.items():
+
+                # For location, group unique `highlighted_at`s
+                highlighted_ats = set()
+
+                for hl in hls:
+                    highlighted_ats.add(hl.highlighted_at)
+
+                # If all `highlighted_at`s the same: multiple versions of
+                # same Hl. If more than one `highlighted_at` different
+                # Hl(s) at the same location. 
+                if len(highlighted_ats) > 1:
+                    # Total all Hls with different `highlighted_at`
+                    # Exclude an (abitrary) "original" for duplicate count
+                    duplicate_locations += (len(highlighted_ats) - 1) 
+
+        return duplicate_locations
+
+    @ordered_property(140)
+    def snipd_duplicate_locations_from_hls_by_location_and_hl_at(self) -> int:
+        """
+        14. Total unique HLs duplicating location (i.e. same location, different `highlighted_at`) METHOD 2:
+        >>> WHY DOESN'T THIS MATCH METHOD 1???
+
+        """
+        total_hls = 0
+        for snipd_url, hls_by_location_and_hl_at in self.snipd_location_duplicates_by_snipd_url.items():
+            for location, hls_by_hl_at in hls_by_location_and_hl_at.items():
+                for hl_at, hls in hls_by_hl_at.items():
+                    total_hls += (len(hls) - 1)
+        return total_hls
+
+    @ordered_property(150)
+    def snipd_episodes_with_duplicate_location_hls(self) -> int:
+        """
+        15. Total Snipd episodes with at least one duplicate location highlight:
+        """
+        return len(self.snipd_location_duplicates_by_snipd_url)
 
     def _group_snipd_episode_hls_by_location(
             self, snipd_episode: SnipdEpisodeFromDb
@@ -120,53 +176,6 @@ class DbHlsAnalysis:
         if location_duplicates_hls_by_location_and_highlighted_at:
             self.snipd_location_duplicates_by_snipd_url[snipd_episode.snipd_url] = location_duplicates_hls_by_location_and_highlighted_at   
 
-    @property
-    def snipd_duplicate_locations_from_hls_by_location(self):
-        """
-        Total unique HLs duplicating location (i.e. same location, different `highlighted_at`) METHOD 1:
-        >>> WHY DOESN'T THIS MATCH METHOD 2???
-        """
-        duplicate_locations = 0
-        for eps_hls_by_location in self.snipd_hls_by_location.values():
-            for location, hls in eps_hls_by_location.items():
-
-                # For location, group unique `highlighted_at`s
-                highlighted_ats = set()
-
-                for hl in hls:
-                    highlighted_ats.add(hl.highlighted_at)
-
-                # If all `highlighted_at`s the same: multiple versions of
-                # same Hl. If more than one `highlighted_at` different
-                # Hl(s) at the same location. 
-                if len(highlighted_ats) > 1:
-                    # Total all Hls with different `highlighted_at`
-                    # Exclude an (abitrary) "original" for duplicate count
-                    duplicate_locations += (len(highlighted_ats) - 1) 
-
-        return duplicate_locations
-
-    
-    @property
-    def snipd_duplicate_locations_from_hls_by_location_and_hl_at(self) -> int:
-        """
-        Total unique HLs duplicating location (i.e. same location, different `highlighted_at`) METHOD 2:
-        >>> WHY DOESN'T THIS MATCH METHOD 1???
-
-        """
-        total_hls = 0
-        for snipd_url, hls_by_location_and_hl_at in self.snipd_location_duplicates_by_snipd_url.items():
-            for location, hls_by_hl_at in hls_by_location_and_hl_at.items():
-                for hl_at, hls in hls_by_hl_at.items():
-                    total_hls += (len(hls) - 1)
-        return total_hls
-
-    @property
-    def snipd_episodes_with_duplicate_location_hls(self) -> int:
-        """
-        Total Snipd episodes with at least one duplicate location highlight:
-        """
-        return len(self.snipd_location_duplicates_by_snipd_url)
 
 #--------------------------------------------------------------------------------------------------------------------------
     def print_properties(self):
@@ -189,7 +198,12 @@ class DbHlsAnalysis:
             f"==== SUMMARY STATS FOR '{self.dbhls.query_shortname}'"
             f" ON {datetime.now().isoformat(sep=" ", timespec="minutes")} ====\n"
         )
-        for name, prop in inspect.getmembers(type(self), lambda x: isinstance(x, property)):
+
+        # Gather and apply sorting via order_property decorator
+        class_properties = inspect.getmembers(type(self), lambda x: isinstance(x, property))
+        class_properties.sort(key=lambda item: getattr(item[1].fget, "order", 999))
+
+        for name, prop in class_properties:
             print(inspect.getdoc(prop))
             print(getattr(self, name))
             print("---")
@@ -247,10 +261,10 @@ class DbHlsAnalysis:
 #----------- SORT BY PROPERTY AND METHOD THAT GENERATES STATS FOR PROPERTY  ---------
     
     # Property requires no generator method
-    @property
+    @ordered_property(10)
     def snipd_episodes(self) -> None:
         """
-        Total Snipd highlights:
+        1. Total Snipd highlights:
         """
         count = sum(
             len(book.highlights) for book in self.dbhls.hls_by_book
@@ -259,25 +273,25 @@ class DbHlsAnalysis:
         return count
 
     # Property requires not generator method
-    @property
+    @ordered_property(20)
     def snipd_highlights(self) -> int:
         """
-        Total Snipd podcast episodes:
+        2. Total Snipd podcast episodes:
         """
         return len(self.dbhls.hls_by_book_dict)
 
 
-    @property
+    @ordered_property(30)
     def snipd_unique_episodes(self) -> int:
         """
-        Total unique snipd urls/podcast episodes:
+        3. Total unique snipd urls/podcast episodes:
         """
         return len(self.snipd_book_urls)
 
-    @property
+    @ordered_property(40)
     def snipd_duplicate_episodes(self) -> int:
         """
-        Total duplicate books (i.e. books duplicating pre-existing snipd url):
+        4. Total duplicate books (i.e. books duplicating pre-existing snipd url):
         """
         return len(self.snipd_duplicate_book_ids)
 
@@ -295,10 +309,10 @@ class DbHlsAnalysis:
             self.snipd_book_urls.append(book.source_url)
 
 
-    @property
+    @ordered_property(50)
     def snipd_url_mismatches(self) -> int:
         """
-        Total snipd books where `source_url` and `unique_url` are different.
+        5. Total snipd books where `source_url` and `unique_url` are different.
         """
         return self.snipd_books_url_mismatch
 
@@ -310,17 +324,17 @@ class DbHlsAnalysis:
             self.snipd_books_url_mismatch += 1
 
 
-    @property
+    @ordered_property(60)
     def snipd_hls_missing_location(self) -> int:
         """
-        Total snipd hls missing a `location` field.
+        6. Total snipd hls missing a `location` field.
         """
         return len(self.snipd_hls_no_location)
 
-    @property
+    @ordered_property(70)
     def snipd_hls_missing_location_ai_notes(self) -> int:
         """
-        Total snipd hls missing a `location` field that are definitely 'Episode AI Notes':
+        7. Total snipd hls missing a `location` field that are definitely 'Episode AI Notes':
         """
         return len(self.snipd_hls_no_location_ai_notes)
 
@@ -337,17 +351,17 @@ class DbHlsAnalysis:
                 self.snipd_hls_no_location_ai_notes.append(hl)
 
 
-    @property
+    @ordered_property(80)
     def snipd_hls_missing_highlighted_at_date(self) -> int:
         """
-        Total snipd hls missing a `highlighted_at` field.
+        8. Total snipd hls missing a `highlighted_at` field.
         """
         return len(self.snipd_hls_no_highlighted_at)
 
-    @property
+    @ordered_property(90)
     def snipd_hls_missing_created_at_date(self) -> int:
         """
-        Total snipd hls missing a `created_at` field.
+        9. Total snipd hls missing a `created_at` field.
         """
         return len(self.snipd_hls_no_created_at)
 
@@ -361,10 +375,10 @@ class DbHlsAnalysis:
             self.snipd_hls_no_created_at.append(hl)
 
 
-    @property
+    @ordered_property(100)
     def snipd_hls_missing_snipd_url(self) -> int:
         """
-        Total hls missing a snipd hl `url` (distinct from snipd podcast url):
+        10. Total hls missing a snipd hl `url` (distinct from snipd podcast url):
         """
         return len(self.snipd_hls_no_snipd_url)
 
@@ -376,10 +390,10 @@ class DbHlsAnalysis:
             self.snipd_hls_no_snipd_url.append(hl)
 
 
-    @property
+    @ordered_property(110)
     def snipd_unique_episode_book_counts(self) -> str:
         """
-        Counts of total books per unique snipd url. (i.e. number of duplicate books).
+        11. Counts of total books per unique snipd url. (i.e. number of duplicate books).
         """
         result = "\n"
         for num_of_episodes, num_of_books in sorted(self.snipd_episode_book_counts.items()):
@@ -400,10 +414,10 @@ class DbHlsAnalysis:
             self.snipd_episode_book_counts[book_count] = 1
 
 
-    @property
+    @ordered_property(120)
     def snip_highlighted_at_mismatch_hl_url(self) -> int:
         """
-        Total Hls with matching `highlighted_at` but different <snip> url:
+        12. Total Hls with matching `highlighted_at` but different <snip> url:
         """
         return len(self.snipd_hls_url_hl_at_mismatch)
 
