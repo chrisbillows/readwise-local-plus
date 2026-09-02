@@ -10,6 +10,9 @@ include all data from the `Book` and `Highlight` ORM models, as well as
 additional fields required (or useful) for any workflow. Create workflow
 specific objects if performance is an issue.
 """
+from __future__ import annotations
+
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime, date
@@ -28,7 +31,6 @@ from readwise_local_plus.models import Book, Highlight
 
 
 logger = logging.getLogger(__name__)
-
 
 T = TypeVar("T")
 
@@ -64,6 +66,278 @@ def dataclass_from_orm(cls: type[T], orm_object: Base, **overrides: Any) -> T:
         kwargs = values
 
     return cls(**kwargs)
+
+
+class DbHls:
+    # Key is shortname : string, value is a db query : Select[tuple[Highlight]]
+    DB_QUERIES = {
+        "all_snipd" : (
+            select(Highlight)
+            .join(Highlight.book)
+            .join(Highlight.batch)
+            .where(
+                Book.category == "podcasts",
+                Book.source == "snipd",
+            )
+            .options(
+                contains_eager(Highlight.book),
+                contains_eager(Highlight.batch),
+            )
+            .order_by(
+                Highlight.book_id,
+                Highlight.highlighted_at,
+                Highlight.id,
+            )
+        )
+    }
+
+    def __init__(self, query_shortname: str):
+        """
+        Enrichd Hls in mutliple groupings from a shortname db query.
+
+        Primary generalised export object. Runs the given db query
+        (via shortname), groups Hls into multiple export friendly shapes
+        and enriches Hls into export ready formats (via `BaseFmtr`
+        objects).
+
+        Allows creation of export specific data shapes but keeps those
+        shapes sharable and reusable across export targets.
+
+        Define db queries/shortnames `db_export.DB_QUERIES`.
+
+        NOTE: The data collections are not intended for direct mutation
+        although this isn't prevented. Rerunning `_populate` may produce
+        correct update downstream data states - but this is not guaranteed.
+
+        Beyond the below, various attrs are gated as private for simplicity.
+        These are intemediate data states less likely to be useful, but are
+        useable.
+
+        Parameters
+        ----------
+        query_shortname : str
+            Lookup for the required db query in `db_export.DB_QUERIES`
+
+        Attributes
+        ----------
+        db_query : Select[tuple[Highlight]]
+            The database query as a SQLAlchemy `Select` statement.
+        user_config : UserConfig
+            A rwlp user config object.
+        db_path : Path
+            The rwlp sqlite db path from the user_config.
+
+        Properties
+        ----------
+        hls_by_book : list[BookFromDb]
+            Hls grouped by book as a list.
+        hls_by_snipd_url : list[SnipdEpisodeFromDb]
+            Hls grouped into unique episodes by snipd URL as a list.
+        """
+        self.query_shortname = query_shortname
+        self.db_query: Select[tuple[Highlight]] = self.DB_QUERIES[query_shortname]
+        self.user_config: UserConfig = fetch_user_config()
+        self.db_path: Path = self.user_config.db_path
+        self._hls_by_book_dict: dict[int, BookFromDb] = {}
+        self._hls_by_book: list[BookFromDb] | None = None
+        self._hls_by_snipd_url_dict: dict[str, SnipdEpisodeFromDb] | None = None
+        self._hls_by_snipd_url: list[SnipdEpisodeFromDb] | None = None
+        self._populate()
+
+    @property
+    def hls_by_book(self) -> list[BookFromDb]:
+        """
+        Hls grouped by book as a list.
+
+        NOTE: Books are not reliably deduplicated by Readwise in edge cases.
+        It may be preferable to add a deduplication step on export. See
+        `hls_by_snipd_url` and the resultant workflow as an example.
+
+        Returns
+        -------
+        list[BookFromDb]
+            A list of BookFromDbs, including Hls enriched by any configured
+            `BaseFmtr`.
+        """
+        # Build once, lazy cache
+        if not self._hls_by_book:
+            self._hls_by_book = list(self._hls_by_book_dict.values())
+        return self._hls_by_book
+
+    @property
+    def hls_by_snipd_url(self) -> list[SnipdEpisodeFromDb]:
+        """
+        Hls grouped into unique episodes by snipd URL as a list.
+
+        Readwise does not reliabily deduplicate snipd episodes. Snipd URL is the
+        reliable provider of uniqueness.
+
+        Returns
+        -------
+        list[SnipdEpisodeFromDb]
+            A list of SnipdEpisodeFromDbs, including HLs enriched by any
+            configured `BaseFmtr`.
+        """
+        # Build once, lazy cache
+        if not self._hls_by_snipd_url:
+            if not self._hls_by_snipd_url_dict:
+                self._generate_hls_by_snipd_url_dict()
+            self._hls_by_snipd_url = list(self.hls_by_snipd_url_dict.values())
+        return self._hls_by_snipd_url
+
+    def _populate(self):
+        """
+        Populate the object.
+
+        Run before accessing properties on Hl state not guaranteed.
+
+        """
+        self._fetch_query_and_group_hls_by_book_id_and_book()
+        self._enrich_highlights()
+
+    def _fetch_query_and_group_hls_by_book_id_and_book(self):
+        """
+        Initial db fetch for the object's query.
+
+        Creates a dictionary where the key is a book id and the value is
+        a BookFromDB with highlights as an attribute. This is a de facto
+        "standard" export format which can be readily reformatted without
+        requiring a SQL Alchemy session. 
+        """
+        with get_session(self.db_path) as session:
+            for highlight in session.scalars(self.db_query):
+                book_id = highlight.book_id
+                book = self._hls_by_book_dict.get(book_id)
+
+                if book is None:
+                    snipd_uid = self._get_snipd_uid(highlight.book.source_url)
+                    book = dataclass_from_orm(
+                        BookFromDb,
+                        highlight.book,
+                        import_date=highlight.book.batch.database_write_time,
+                        snipd_uid=snipd_uid,
+                        snipd_url=highlight.book.source_url
+                    )
+                    self._hls_by_book_dict[book_id] = book
+
+                book.highlights.append(
+                    dataclass_from_orm(
+                        HighlightFromDb,
+                        highlight,
+                        import_date=highlight.batch.database_write_time,
+                        book_source=book.source,
+                        book_snipd_url=book.source_url,
+                        book_snipd_uid=book.snipd_uid,
+                    )
+                )
+
+    def _enrich_highlights(self) -> None:
+        """
+        Add all attributes to all Hls.
+
+        This includes all fmtd attributes for the hl type. E.g. adds
+        derived attrs via the HighlightFromDb itself and/or with a
+        `BaseFmtr`, if configured.
+        """
+        for book in self._hls_by_book_dict.values():
+            for hl in book.highlights:
+                hl._populate()
+                fmtr_ins: BaseFmtr = self._get_hl_processor(hl)
+                if fmtr_ins:
+                    fmtr_ins.populate_hl()
+
+    def _generate_hls_by_snipd_url_dict(self) -> dict[str, SnipdEpisodeFromDb]:
+        """
+        Hls grouped into unique episodes by snipd URL as a dictionary.
+
+        Readwise does not reliabily deduplicate snipd episodes. Snipd URL is the
+        reliable provider of uniqueness.
+
+        Create from `self.hls_by_book_dict` rather thanb from the DB to allow access
+        to book metadata.
+
+        NOTE: Mutating the DB output is not intended behaviour. If doing so, manually
+        delete `self.hls_by_book_dict` to force recalculation.
+
+        Returns
+        -------
+        dict[str, SnipdEpisodeFromDb]
+            A dict where the key is a Snipd URL and the values are SnipdEpisodeFromDbs
+            sorted by , with highlights sorted by `highlighted_at`.
+        """
+        # Build once, lazy cache
+        if self._generate_hls_by_snipd_url_dict is None:
+            cache: dict[str, SnipdEpisodeFromDb] = {}
+
+            for book in self._hls_by_book_dict.values():
+                snipd_uid = self._get_snipd_uid(book.source_url)
+
+                if snipd_uid in cache:
+                    cache[snipd_uid].books.append(book)
+
+                else:
+                    book.highlights.sort(key=lambda hl: hl.highlighted_at)
+                    snipd_episode = SnipdEpisodeFromDb(
+                        snipd_url=book.source_url,
+                        snipd_uid=snipd_uid,
+                        books=[book]
+                    )
+                    cache[snipd_uid] = snipd_episode
+
+            self._generate_hls_by_snipd_url_dict = cache
+
+    @staticmethod
+    def _get_hl_processor(hl: HighlightFromDb) -> T:
+            """
+            Generate a processor for the Hl for a given workflow.
+
+            If the Hl is not exported as part of the workflow, set to `None`.     
+            """
+            if hl.snipd_hl_type == "transcript":
+                fmtr_ins = SnipdTranscriptFmtr(hl)
+            elif hl.snipd_hl_type == "episode-ai-notes":
+                fmtr_ins = SnipdAiEpisodeNotesFmtr(hl)
+            else:
+                fmtr_ins = None
+
+            return fmtr_ins
+
+    def _sort_and_filter_highlights_for_snipd(hl: HighlightFromDb) -> HighlightFromDb:
+        """
+        TODO: This will create the final sorted, filtered list of highlights...
+        So probably on each episode???
+        """
+        pass
+
+    @staticmethod
+    def _get_snipd_uid(url: str) -> str:
+        """
+        Extract snipd uif from a snipd URL.
+
+        Parameters
+        ----------
+        snipd_url : str
+            A snipd_url for a podcast episode or an individual snip.
+
+        Returns
+        -------
+        str
+            The extracted snipd uid.
+        """
+        return urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+
+
+class FmtdHl:
+    """
+    Data collection class for HighlightFromDb to attach formatter-generated state.
+
+    Wild west grouping of any and all intermediate and final states.
+
+    Intermediate states will be classed as private e.g. '_<attr>'
+    """
+
+    def __repr__(self):
+        return f"HlFmtd({', '.join(vars(self).keys())})"
 
 
 class HighlightFromDb:
@@ -223,8 +497,8 @@ class BookFromDb:
     validation_errors: dict[str, str]
     # Additional fields
     import_date: datetime
-    snipd_uid: str | None
     snipd_url: str | None  # Duplicate of `source_url` for developer ease
+    snipd_uid: str | None
     highlights: list[HighlightFromDb] = field(default_factory=list)
 
     @property
@@ -389,216 +663,6 @@ Could add to front matter always...
 book_ids
 
 """    
-
-class DbHls:
-    """
-    Database hls from a DB query with helper attributes and methods.
-    """
-    # Key is shortname : string, value is a db query : Select[tuple[Highlight]]
-    DB_QUERIES = {
-        "all_snipd" : (
-            select(Highlight)
-            .join(Highlight.book)
-            .join(Highlight.batch)
-            .where(
-                Book.category == "podcasts",
-                Book.source == "snipd",
-            )
-            .options(
-                contains_eager(Highlight.book),
-                contains_eager(Highlight.batch),
-            )
-            .order_by(
-                Highlight.book_id,
-                Highlight.highlighted_at,
-                Highlight.id,
-            )
-        )
-    }
-
-    def __init__(self, query_shortname: str):
-        self.query_shortname = query_shortname
-        self.db_query: Select[tuple[Highlight]] = self.DB_QUERIES[query_shortname]
-        self.user_config: UserConfig = fetch_user_config()
-        self.db_path: Path = self.user_config.db_path
-        self.hls_by_book_dict: dict[int, BookFromDb] = {}
-        self._hls_by_book: list[BookFromDb] | None = None
-        self._hls_by_snipd_url_dict: dict[str, SnipdEpisodeFromDb] | None = None
-        self._hls_by_snipd_url: list[SnipdEpisodeFromDb] | None = None
-
-    def populate(self):
-        """
-        Populate the object.
-        """
-        self._fetch_query_and_group_hls_by_book_id_and_book()
-        self._enrich_highlights()
-
-    @property
-    def hls_by_book(self) -> list[BookFromDb]:
-        """
-        Hls by book as a list.
-
-        Transforms hls_by_book_dict which is primarily a data processing 
-        artefact.
-        """
-        # Build once, lazy cache
-        if not self._hls_by_book:
-            self._hls_by_book = list(self.hls_by_book_dict.values())
-        return self._hls_by_book
-
-    @property
-    def hls_by_snipd_url_dict(self) -> dict[str, SnipdEpisodeFromDb]:
-        """
-        Hls grouped into unique episodes by snipd URL as a dictionary.
-
-        Readwise does not reliabily deduplicate snipd episodes. Snipd URL is the
-        reliable provider of uniqueness.
-        
-        Create from `self.hls_by_book_dict` rather thanb from the DB to allow access 
-        to book metadata.
-
-        NOTE: Mutating the DB output is not intended behaviour. If doing so, manually
-        delete `self.hls_by_book_dict` to force recalculation.
-
-        Returns
-        -------
-        dict[str, SnipdEpisodeFromDb]
-            A dict where the key is a Snipd URL and the values are SnipdEpisodeFromDbs
-            sorted by , with highlights sorted by `highlighted_at`.  
-        """
-        # Build once, lazy cache
-        if self._hls_by_snipd_url_dict is None:
-            cache: dict[str, SnipdEpisodeFromDb] = {}
-
-            for book in self.hls_by_book_dict.values():
-                snipd_uid = self._get_snipd_uid(book.source_url)
-
-                if snipd_uid in cache:
-                    cache[snipd_uid].books.append(book)
-        
-                else:
-                    book.highlights.sort(key=lambda hl: hl.highlighted_at)
-                    snipd_episode = SnipdEpisodeFromDb(
-                        snipd_url=book.source_url,
-                        snipd_uid=snipd_uid,
-                        books=[book]
-                    )
-                    cache[snipd_uid] = snipd_episode
-
-            self._hls_by_snipd_url_dict = cache
-
-        return self._hls_by_snipd_url_dict
-
-    @property
-    def hls_by_snipd_url(self) -> list[SnipdEpisodeFromDb]:
-        """
-        Hls grouped into unique episodes by snipd URL as a list.
-
-        Readwise does not reliabily deduplicate snipd episodes. Snipd URL is the
-        reliable provider of uniqueness.
-
-        Returns
-        -------
-
-        """
-        # Build once, lazy cache
-        if not self._hls_by_snipd_url:
-            self._hls_by_snipd_url = list(self.hls_by_snipd_url_dict.values())
-        return self._hls_by_snipd_url
-      
-    def _fetch_query_and_group_hls_by_book_id_and_book(self):
-        """
-        Initial db fetch for the object's query.
-
-        Creates a dictionary where the key is a book id and the value is
-        a BookFromDB with highlights as an attribute. This is a de facto
-        "standard" export format which can be readily reformatted without
-        requiring a SQL Alchemy session. 
-        """
-        with get_session(self.db_path) as session:
-            for highlight in session.scalars(self.db_query):
-                book_id = highlight.book_id
-                book = self.hls_by_book_dict.get(book_id)
-    
-                if book is None:
-                    snipd_uid = self._get_snipd_uid(highlight.book.source_url)
-                    book = dataclass_from_orm(
-                        BookFromDb,
-                        highlight.book,
-                        import_date=highlight.book.batch.database_write_time,
-                        snipd_uid=snipd_uid,
-                        snipd_url=highlight.book.source_url
-                    )
-                    self.hls_by_book_dict[book_id] = book
-    
-                book.highlights.append(
-                    dataclass_from_orm(
-                        HighlightFromDb,
-                        highlight,
-                        import_date=highlight.batch.database_write_time,
-                        book_source=book.source,
-                        book_snipd_url=book.source_url,
-                        book_snipd_uid=snipd_uid,
-                    )
-                )
-
-    def _enrich_highlights(self) -> None:
-        """
-        Add all attributes to all Hls.
-
-        This includes all fmtd attributes for the hl type. E.g. adds 
-        derived attrs via the HighlightFromDb itself and/or with a 
-        `BaseFmtr`, if configured.
-        """
-        for book in self.hls_by_book_dict.values():
-            for hl in book.highlights:
-                hl._populate()
-                fmtr_ins: BaseFmtr = self._get_hl_processor(hl)
-                if fmtr_ins:
-                    fmtr_ins.populate_hl()
-
-    @staticmethod
-    def _get_hl_processor(hl: HighlightFromDb) -> T:
-            """
-            Generate a processor for the Hl for a given workflow.
-    
-            If the Hl is not exported as part of the workflow, set to `None`.       
-            """
-            if hl.snipd_hl_type == "transcript":
-                fmtr_ins = SnipdTranscriptFmtr(hl)
-            elif hl.snipd_hl_type == "episode-ai-notes":
-                fmtr_ins = SnipdAiEpisodeNotesFmtr(hl)
-            else:
-                fmtr_ins = None
-
-            return fmtr_ins
-       
-    def _sort_and_filter_highlights_for_snipd(hl: HighlightFromDb) -> HighlightFromDb:
-        """
-        TODO: This will create the final sorted, filtered list of highlights...
-        So probably on each episode???
-
-        
-        
-        """
-
-    @staticmethod
-    def _get_snipd_uid(url: str) -> str:
-        return urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
-
-
-
-class FmtdHl:
-    """
-    Formatter-generated state attached to a HighlightFromDb.
-    
-    Wild west grouping of any and all intermediate and final states.
-
-    Intermediate states will be classed as private e.g. '_<attr>'
-    """
-
-    def __repr__(self):
-        return f"HlFmtd({', '.join(vars(self).keys())})"
 
 
 class BaseFmtr(ABC):
