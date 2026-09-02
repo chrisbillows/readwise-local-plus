@@ -21,7 +21,7 @@ from readwise_local_plus.workflows.chatgpt_daily_prototype import (
     write_batch_to_daily_notes,
 )
 
-from readwise_local_plus.workflows.obsidian.obsidian_snipd import write_batch_to_obsidian
+from readwise_local_plus.workflows.obsidian.obsidian_snipd import write_dbhls_to_obsidian
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +169,7 @@ def main(user_config: Optional[UserConfig] = None) -> None:
 
             # commented out to avoid writing to roam during testing
             # write_batch_to_daily_notes(args.batch_id)
-            write_batch_to_obsidian(user_config, args.batch_id)
+            write_dbhls_to_obsidian(user_config, args.batch_id)
 
         elif args.all:
             logger.info("Running full sync (--all).")
