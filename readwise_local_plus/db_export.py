@@ -71,7 +71,7 @@ def dataclass_from_orm(cls: type[T], orm_object: Base, **overrides: Any) -> T:
 class DbHls:
     # Key is shortname : string, value is a db query : Select[tuple[Highlight]]
     DB_QUERIES = {
-        "all_snipd" : (
+        "snipd" : (
             select(Highlight)
             .join(Highlight.book)
             .join(Highlight.batch)
@@ -88,10 +88,10 @@ class DbHls:
                 Highlight.highlighted_at,
                 Highlight.id,
             )
-        )
+        ),
     }
 
-    def __init__(self, query_shortname: str):
+    def __init__(self, query_shortname: str, batch_id: int | None = None):
         """
         Enrichd Hls in mutliple groupings from a shortname db query.
 
@@ -117,7 +117,8 @@ class DbHls:
         ----------
         query_shortname : str
             Lookup for the required db query in `db_export.DB_QUERIES`
-
+        batch_id : int | None, default = `None`
+            A batch id, if present, used to construct the `db_query`.
         Attributes
         ----------
         db_query : Select[tuple[Highlight]]
@@ -134,7 +135,8 @@ class DbHls:
         hls_by_snipd_url : list[SnipdEpisodeFromDb]
             Hls grouped into unique episodes by snipd URL as a list.
         """
-        self.query_shortname = query_shortname
+        self.query_shortname: str = query_shortname
+        self.batch_id: int| None = batch_id 
         self.db_query: Select[tuple[Highlight]] = self.DB_QUERIES[query_shortname]
         self.user_config: UserConfig = fetch_user_config()
         self.db_path: Path = self.user_config.db_path
@@ -182,7 +184,7 @@ class DbHls:
         if not self._hls_by_snipd_url:
             if not self._hls_by_snipd_url_dict:
                 self._generate_hls_by_snipd_url_dict()
-            self._hls_by_snipd_url = list(self.hls_by_snipd_url_dict.values())
+            self._hls_by_snipd_url = list(self._hls_by_snipd_url_dict.values())
         return self._hls_by_snipd_url
 
     def _populate(self):
@@ -192,8 +194,34 @@ class DbHls:
         Run before accessing properties on Hl state not guaranteed.
 
         """
+        self._fetch_db_query()
         self._fetch_query_and_group_hls_by_book_id_and_book()
         self._enrich_highlights()
+
+    def _fetch_db_query(self):
+        """
+        Populate the db_query from the `query_shortname` and optional `batch_id`
+
+        Raises
+        ------
+        KeyError
+            If `query_shortname` not in `DB_QUERIES`.
+        """
+        # Currently odd loop, live with it bro!
+        try:
+            query = self.DB_QUERIES[self.query_shortname]
+        except KeyError as err:
+            logger.error(
+                "The `query_shortname`", 
+                self.query_shortname, 
+                "not found in `DB_QUERIES`."
+            )
+            raise err
+
+        if not self.batch_id == "all":
+            query = query.where(Highlight.batch_id == self.batch_id)
+
+        self.db_query = query
 
     def _fetch_query_and_group_hls_by_book_id_and_book(self):
         """
@@ -266,7 +294,7 @@ class DbHls:
             sorted by , with highlights sorted by `highlighted_at`.
         """
         # Build once, lazy cache
-        if self._generate_hls_by_snipd_url_dict is None:
+        if self._hls_by_snipd_url_dict is None:
             cache: dict[str, SnipdEpisodeFromDb] = {}
 
             for book in self._hls_by_book_dict.values():
@@ -284,7 +312,7 @@ class DbHls:
                     )
                     cache[snipd_uid] = snipd_episode
 
-            self._generate_hls_by_snipd_url_dict = cache
+            self._hls_by_snipd_url_dict = cache
 
     @staticmethod
     def _get_hl_processor(hl: HighlightFromDb) -> T:
