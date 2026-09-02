@@ -568,7 +568,8 @@ class SnipdEpisodeFromDb:
         snipd_uid : str
             The episode's unique snipd uid, extracted from the snipd url.
         books : list[BookFromDb]
-
+            All books that share the same snipd_url (as `source_url`). Hls
+            may be duplicates/versions or may not.
         
         Attributes
         ----------
@@ -670,6 +671,7 @@ tags:
 - podcast-eps
 ---
 """
+        # TODO: add useful db info? book_ids?
         most_recent_book = self.books[0]
         template_replacements = {
             "{{title}}": self.podcast_title,
@@ -683,14 +685,7 @@ tags:
         for placeholder, value in template_replacements.items():
             front_matter_template = front_matter_template.replace(placeholder, value)
 
-        self.page_front_matter = front_matter_template
-
-
-"""
-Could add to front matter always...
-book_ids
-
-"""    
+        self.page_front_matter = front_matter_template + "\n"
 
 
 class BaseFmtr(ABC):

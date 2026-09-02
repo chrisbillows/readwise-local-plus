@@ -84,8 +84,6 @@ def write_dbhls_to_obsidian(
 
         episode_file = podcast_dir / (snipd_ep.episode_title + ".md")
 
-        breakpoint()
-
         # create new file
         if not episode_file.exists():
             episode_file.write_text(snipd_ep.full_page)
@@ -110,11 +108,11 @@ if __name__ == "__main__":
     query_shortname = "snipd"
 
     # Useful batches
-    batch_id = "all" # 890
+    # batch_id = "all" # 890
     # batch_id = 110 # 0 books
     # batch_id = 111 # 376 books
     # batch_id = 112 # 1 book
-    # batch_id = 113 # 10 books
+    batch_id = 113 # 10 books
 
     write_dbhls_to_obsidian(user_config, query_shortname, batch_id)
 
