@@ -2,7 +2,7 @@
 tests/data/real/
 .vscode
 .codex
-docs/tickets/79_dupes_highlight_analysis.md
+docs/tickets/working_notes.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__

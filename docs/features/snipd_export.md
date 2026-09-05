@@ -47,6 +47,23 @@ readwise_local_plus/
 
 Details [here](../tickets/79_1_add_obs_sync.md)
 
+### Phase 1.5 / ticket tbc - Improving output
+
+- various improvements to develop usefulness
+- possible:
+    - work better with bases
+        - id
+        - hl stats?
+            - hl counts
+            - version stats?
+        - podcast name in front matter
+        - cover image url
+    - make hls more useful
+        - metadata as footnotes?
+            - snipd hl link
+            - rw link
+            - id, location, lookup
+
 ### Phase 2 / ticket 81 - capture additional metadata
 
 - get show notes and chapter headings
@@ -71,3 +88,7 @@ Reminder for ntlk:
 - refactor as sensible (e.g. combine with roam code, possibly?)
 - run (manually, via a disposable bash script) for all podcast batches
 
+## Future consideration
+
+- how are we handle file overwrites?  
+    - e.g. if snipd makes a load of changes?
