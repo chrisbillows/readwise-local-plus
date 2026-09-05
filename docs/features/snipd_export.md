@@ -45,7 +45,24 @@ readwise_local_plus/
 - processing logic
     - figure out formatting db output
 
-Details [here](../tickets/79_add_obs_sync.md)
+Details [here](../tickets/79_1_add_obs_sync.md)
+
+### Phase 1.5 / ticket tbc - Improving output
+
+- various improvements to develop usefulness
+- possible:
+    - work better with bases
+        - id
+        - hl stats?
+            - hl counts
+            - version stats?
+        - podcast name in front matter
+        - cover image url
+    - make hls more useful
+        - metadata as footnotes?
+            - snipd hl link
+            - rw link
+            - id, location, lookup
 
 ### Phase 2 / ticket 81 - capture additional metadata
 
@@ -54,6 +71,11 @@ Details [here](../tickets/79_add_obs_sync.md)
 - ensure this is extremely API friendly e.g. handful of scrapes per minute with
   a break, and back off etc.
 - run for all podcasts for initial db population
+
+Reminder for ntlk: 
+
+- nltk needs to be pinned at 3.9.2  for dev, a new security feature to prevent shadowed dependencies doesn't work with an editable install
+
 
 ### Phase 3 / ticket 82 - process and format additonal metadata
 
@@ -66,3 +88,7 @@ Details [here](../tickets/79_add_obs_sync.md)
 - refactor as sensible (e.g. combine with roam code, possibly?)
 - run (manually, via a disposable bash script) for all podcast batches
 
+## Future consideration
+
+- how are we handle file overwrites?  
+    - e.g. if snipd makes a load of changes?

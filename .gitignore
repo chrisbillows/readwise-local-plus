@@ -2,6 +2,7 @@
 tests/data/real/
 .vscode
 .codex
+docs/tickets/working_notes.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__

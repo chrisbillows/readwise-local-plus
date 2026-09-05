@@ -37,6 +37,8 @@ class UserConfig:
         db_path : pathlib.Path
             The path to the SQLite database file, defaults to
             ``~/.readwise-local-plus/readwise.db``.
+        obsidian_vault_path: pathlib.Path
+            Absolute path to an Obsidian Vault to export to.
         """
         self.user_dir = user_dir
         self.app_dir: Path = user_dir / "readwise-local-plus"
@@ -49,6 +51,8 @@ class UserConfig:
         self.readwise_api_token: str | None = os.getenv("READWISE_API_TOKEN")
         self.roam_api_token: str | None = os.getenv("ROAM_API_TOKEN")
         self.roam_graph_name: str = "Billowz"
+        self.obsidian_vault_path: Path = Path(os.getenv("OBSIDIAN_VAULT_PATH"))
+        self.obsidian_rw_dir: Path = self.obsidian_vault_path / "readwise"
 
     def load_environment_variables_file(self) -> None:
         """
