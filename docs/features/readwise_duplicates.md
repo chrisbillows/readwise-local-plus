@@ -9,8 +9,6 @@ Db contains multiple duplicates
 
 - Snipd URLs retain stable episode and snip UUIDs across the different Readwise records. 
 
-This was
-
 ## Wider Readwise Duplicate Scan (22 August 2026)
 
 ### Scope
