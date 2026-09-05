@@ -62,7 +62,7 @@ class DbHlsAnalysis:
         self.snipd_hls_no_created_at: list[HighlightFromDb] = []
         self.snipd_hls_no_snipd_url: list[HighlightFromDb] = []
         self.snipd_episode_book_counts = {}
-        self.snipd_hls_url_hl_at_mismatch: list[HighlightFromDb] = []
+        self.snipd_hls_url_hl_at_mismatch: list[tuple[HighlightFromDb, HighlightFromDb]] = []
         #-------------------------------------
         self.snipd_hls_by_location: dict[str, dict[int, list[HighlightFromDb]]] = {}
         self.snipd_hls_by_location_and_hl_at: dict[str, dict[int, list[HighlightFromDb]]] = {}
@@ -278,7 +278,7 @@ class DbHlsAnalysis:
         """
         2. Total Snipd podcast episodes:
         """
-        return len(self.dbhls.hls_by_book_dict)
+        return len(self.dbhls._hls_by_book_dict)
 
 
     @ordered_property(30)
@@ -436,12 +436,12 @@ class DbHlsAnalysis:
         a lack of confidence HL URLs are used by Snipd users, so they might
         be removed.  (Could same be said for episode URLs...?).
         """
-        tracker = {}
+        tracker: dict[datetime, HighlightFromDb] = {}
         for hl in snipd_episode.hls:
 
             # Add unseen `highlighted_at`s to `tracker`
             if hl.highlighted_at not in tracker:
-                tracker[hl.highlighted_at] = hl.url
+                tracker[hl.highlighted_at] = hl
 
             # For seen,  `highlighted_at`, confirm the new hl.url matches
             # the tracked hl's .url.
@@ -450,8 +450,9 @@ class DbHlsAnalysis:
             # EACH OTHER this will be counted as 2 mismatches and not one.
             # This is moot while mistmatches is zero.
             else:
-                if tracker[hl.highlighted_at] != hl.url:
-                    self.snipd_hls_url_hl_at_mismatch.append(hl)
+                tracker_hl = tracker[hl.highlighted_at]
+                if tracker_hl.url != hl.url:
+                    self.snipd_hls_url_hl_at_mismatch.append((tracker_hl, hl))
 
 
 def duplicate_hls_have_identical_highlighted_at(
@@ -667,8 +668,7 @@ def duplicate_locations_need_to_be_kept(
 
 
 if __name__ == "__main__":
-    x = DbHls("all_snipd")
-    x.populate()
-    y = DbHlsAnalysis(x)
-    y.print_analysis()
-    breakpoint()
+    # Use for experimentation/development
+    all_snipd_hls = DbHls("snipd", "all")
+    all_snipd_hls_analysis = DbHlsAnalysis(all_snipd_hls)
+    all_snipd_hls_analysis.print_analysis()
