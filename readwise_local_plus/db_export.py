@@ -18,6 +18,7 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime, date
 import logging
 from pathlib import Path
+import re
 from typing import Any, TypeVar
 from urllib.parse import urlparse
 
@@ -482,7 +483,7 @@ class HighlightFromDb:
                 str(self.id) +
                 " in book id: " +
                 str(self.user_book_id) +
-                " has 'Transcript:' and 'Episode AI notes:' strs. Did not process."
+                " has 'Transcript:' and 'Episode AI notes' strs. Did not process."
                 )
             logger.warning(warning_msg)
             type = "do-not-process"
@@ -534,7 +535,7 @@ class BookFromDb:
         """
         Return the earliest highlight `created_at` value.
         """
-        created_dates = [hl.created_at for hl in self.highlights]
+        created_dates = [hl.createdq_at for hl in self.highlights]
         created_dates.sort()
         return created_dates[0]
 
@@ -569,31 +570,40 @@ class SnipdEpisodeFromDb:
             The episode's unique snipd uid, extracted from the snipd url.
         books : list[BookFromDb]
             All books that share the same snipd_url (as `source_url`). Hls
-            may be duplicates/versions or may not.
+            may be duplicates/versions or may not. Books are sorted oldest
+            to newest.
         
         Attributes
         ----------
+        full_page : str
+            The final export output to Obsidian. Combines
+            `page_front_matter` and `page_body`.
+        fmtd_hls : list
+            Obsidian fmtd lastest highlights. Used to create `page_body`.
+        hls : list[HighlightFromDb]
+            Latest version of all Hls; deduplicated and sorted by location/highlighted_at.
+        all_hl_versions : list[HighlightFromDb]
+            Every version of every highlight ever imported into Readwise.
         podcast_title : str
-            Obsidian safe title, updated per user spec if included in
+            Obsidian safe podcast title, updated per user spec if included in
             `PODCAST_TITLE_MAP`.
+        episode_title : str
+            Obsidian safe podcast episode title.
         page_front_matter : str
             The front matter block as a string with newlines.        
         page_body : str
             The fmtd Hls output by a Fmtr, incrementally added into
             a string with newlines.
-        full_page : str
-            The final export output to Obsidian. Combines 
-            `page_front_matter` and `page_body`.
-        fmtd_hls : list
-            The same fmtd Hls used to create `page_body` as a list.
         """
         self.snipd_url: str = snipd_url
         self.snipd_uid: str = snipd_uid
         self.books: list[BookFromDb] = books
+        self.hls: list[HighlightFromDb] = []
+        self.fmtd_hls: list[str] = []
+        self.all_hl_versions: list[HighlightFromDb] = []
         self.podcast_title: str = ""
         self.episode_title: str = ""
         self.page_front_matter: str = ""
-        self.fmtd_hls: list[str] = [] 
         self.page_body: str = ""
         self.full_page: str = ""
 
@@ -603,30 +613,109 @@ class SnipdEpisodeFromDb:
         """
         self._generate_podcast_title()
         self._generate_episode_title()
+        self._generate_hls()
         self._generate_front_matter()
         self._generate_page_body()
         self.full_page = self.page_front_matter + self.page_body
 
-    @property
-    def hls(self) -> list[HighlightFromDb]:
+    def _generate_hls(self) -> list[HighlightFromDb]:
         """
         A list of hls from all books in the snipd episode, sorted by `highlighted_at`.
         """
-        all_hls = [hl for book in self.books for hl in book.highlights]
-        # TODO: Should this be by location first???
-        all_hls.sort(key=lambda hl: hl.highlighted_at)
-        return all_hls
+        self.all_hl_versions = [hl for book in self.books for hl in book.highlights]
+
+        grouped_by_snipd_url = self._group_hls_by_snipd_url(self.all_hl_versions)
+        deduplicated_hls = self._deduplicate_hls(grouped_by_snipd_url)
+
+        # NOTE: AI notes have an int 0 location. This sort puts them first.
+        deduplicated_hls.sort(key=lambda hl: (hl.location, hl.highlighted_at))
+
+        self.hls = deduplicated_hls
+
+        # Below retained temporarily for future debugging.
+        def display_hl(hl):
+            uid = hl.url.replace("//", "/").split("/")[3][:12]
+            print(
+                f"{hl.location:5}      "
+                f"{hl.highlighted_at.isoformat(timespec='minutes', sep=" ")}      "
+                f"{hl.created_at.isoformat(timespec='minutes')}      {uid}"
+            )
+
+        snipd_hl_debug = False
+        if snipd_hl_debug:
+            print(f"===== {self.books[-1].user_book_id} | {self.books[-1].title} ======")
+            print("\n-------------------------------all_hls ---------------------------")
+            print("  loc   |    highlighted_at   |     created at     |    snipd_uid \n")
+
+            for hl in self.all_hl_versions:
+                display_hl(hl)
+
+            print("\n---------------------------- sorted dedupes-----------------------")
+            print("  loc   |    highlighted_at   |     created at     |    snipd_uid \n")
+            for hl in deduplicated_hls:
+                display_hl(hl)
+
+            print(f"\nTotal all_hls        : {len(self.all_hl_versions)} ")
+            print(f"Total deduplicate_hls: {len(deduplicated_hls)}\n")
+
+    def _group_hls_by_snipd_url(self) -> dict[str, list[HighlightFromDb]]:
+        """
+        Group by snipd url (e.g. `HighlightFromDb.url`).
+
+        Assumes snipd url indicates a unique Hl and therefore the grouped
+        duplicates are versions.
+
+        Raises
+        ------
+        KeyError
+            If a hl has no `url`. Should be impossible.
+
+        Returns
+        -------
+        dict[str, list[h]]
+            Hls grouped by snip url
+        """
+        grouped_by_snipd_url = {}
+
+        for hl in self.all_hl_versions:
+            if not hl.url:
+                raise KeyError
+
+            if not grouped_by_snipd_url.get(hl.url):
+                grouped_by_snipd_url[hl.url] = [hl]
+            else:
+                grouped_by_snipd_url[hl.url].append(hl)
+
+        return grouped_by_snipd_url
+
+    def _deduplicate_hls(
+            self, grouped_by_snipd_url: dict[str, list[HighlightFromDb]]
+        ):
+        """
+        Deduplicate a  by most recent created_at.
+        """
+        latest_versions = []
+        for hls in grouped_by_snipd_url.values():
+            latest = max(hls, key=lambda hl: hl.created_at)
+            latest_versions.append(latest)
+
+        return latest_versions
 
     def _generate_page_body(self) -> None:
         """
-        tbc
+        Create the page body and group fmtd hls as a list.
+
+        Currently handled per `snipd_hl_type` but this
+        may be generalised via `BaseFmtr` at a later
+        date.
         """
-        # Use for now - currently is ALL hls.
-        # - SORTING/FILTERING not built yet
         for hl in self.hls:
             if hl.snipd_hl_type == 'transcript':
                 self.fmtd_hls.append(hl.fmtd.hl_full)
                 self.page_body += hl.fmtd.hl_full
+            if hl.snipd_hl_type == 'episode-ai-notes':
+                self.fmtd_hls.append(hl.hl_full)
+                self.page_body += hl.hl_full
 
     def _obs_safe_filenames_and_frontmatter(self, s: str) -> str:
         """
@@ -640,8 +729,8 @@ class SnipdEpisodeFromDb:
         """
         Revise based on `PODCAST_TITLE_MAP` and ensure Obs safe.
         """
-        # TODO: assumes books sorted newest first
-        book_author = self.books[0].author
+        # Books sorted oldest to newest
+        book_author = self.books[-1].author
         safe_title = self._obs_safe_filenames_and_frontmatter(book_author)
         if safe_title in self.PODCAST_TITLE_MAP:
             safe_title = self.PODCAST_TITLE_MAP[safe_title]
@@ -651,8 +740,8 @@ class SnipdEpisodeFromDb:
         """
         Obs safe episode title.
         """
-        # TODO: assumes books sorted newest first
-        episode_title = self.books[0].title
+        # Books sorted oldest to newest
+        episode_title = self.books[-1].title
         safe_episode_title = self._obs_safe_filenames_and_frontmatter(episode_title)
         self.episode_title = safe_episode_title
 
@@ -661,25 +750,42 @@ class SnipdEpisodeFromDb:
         Create episode frontmatter.
         """
         front_matter_template = """---
-title: {{title}}
+podcast: {{podcast}}
 source: {{source}}
 readwise_url: {{rw_url}}
-listened: {{listened_date}}
-created: {{created_date}}
+highlighted_at: {{highlighed_at}}
+rw_created_at: {{rw_created_at}}
+obs_import_at: {{obs_imported_at}}
+total_hls: {{total_hls}}
+archived_hls: {{archived_hls}}
+book_id: {{book_id}}
 tags:
 - podcast/{{podcast_title_for_tag}}
 - podcast-eps
 ---
 """
-        # TODO: add useful db info? book_ids?
-        most_recent_book = self.books[0]
+        title_for_tag = re.sub(r"[^A-Za-z0-9]", "", self.podcast_title)
+        title_for_tag = title_for_tag.lower().replace(" ", "-")
+
+        oldest_book = self.books[0]
+        earliest_hl = min(oldest_book.highlights, key=lambda hl: hl.highlighted_at)
+
+        most_recent_book = self.books[-1]
+
+        total_hls = len(self.fmtd_hls)
+        archived_hls = len(self.all_hl_versions) - total_hls
+
         template_replacements = {
-            "{{title}}": self.podcast_title,
+            "{{podcast}}": self.podcast_title,
             "{{source}}": self.snipd_url,
             "{{rw_url}}": most_recent_book.readwise_url,
-            "{{listened_date}}": str(most_recent_book.highlights[0].highlighted_at.date()),
-            "{{created_date}}": str(date.today()),
-            "{{podcast_title_for_tag}}": self.podcast_title.lower().replace(" ", "-"),
+            "{{highlighed_at}}": str(earliest_hl.highlighted_at.date()),
+            "{{rw_created_at}}": str(earliest_hl.created_at.date()),
+            "{{obs_imported_at}}": str(date.today()),
+            "{{total_hls}}": str(total_hls),
+            "{{archived_hls}}": str(archived_hls),
+            "{{book_id}}": str(most_recent_book.user_book_id),
+            "{{podcast_title_for_tag}}": title_for_tag,
         }
 
         for placeholder, value in template_replacements.items():
@@ -987,5 +1093,53 @@ class SnipdAiEpisodeNotesFmtr(BaseFmtr):
         self.hl = hl
 
     def populate_hl(self):
-        pass
+        """
+        Create the formated highlight.
 
+        Done directly for short term speed/simplicitly.
+
+        This function will be brittle to changes in
+        Episode AI note formatting.
+        """
+        sentences = self.hl.text.split("\n\n")
+        title = sentences[0]
+
+        fmtd_title = f"## {title}\n"
+
+        fmtd_sentences = []
+        for sentence in sentences[1:]:
+
+            # Sentences are numbered e.g "1. <sentence>"
+            # Count chars that can be cast to digits, up to 9999
+            leading_number_chars = 0
+            for char in sentence[:4]:
+                try:
+                    int(char)
+                except ValueError as err:
+                    continue
+                leading_number_chars += 1
+
+            # The `+ 2` target the ". " follow the leading number chars.
+            sentence_without_num = sentence[(leading_number_chars + 2):]
+            sentence_by_word= sentence_without_num.replace("  ", " ").split(" ")
+
+            # if "10." in sentence and "Gwyneth" in sentence:
+            #     breakpoint()
+
+            # Ignore fragmentary sentences, if any.
+            if len(sentence_by_word) < 7:
+                continue
+
+            # Bullet and bold first five words, add ellipsis.
+            # Indent remaining text under first bullet.
+            sentence_by_word[0] = '- ***' + sentence_by_word[0]
+            sentence_by_word[5] = sentence_by_word[5] + "..." + "***\n  -"
+
+            fmtd_sentence =  " ".join(sentence_by_word)
+            fmtd_sentences.append(fmtd_sentence)
+
+
+        self.hl.hl_full = fmtd_title +"\n" + "\n\n".join(fmtd_sentences) + "\n\n"
+
+
+# There is a configured `if __name__ == `__main__` for development in `obsidian_snipd.py`.
