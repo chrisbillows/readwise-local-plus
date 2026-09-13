@@ -49,20 +49,6 @@ Details [here](../tickets/79_1_add_obs_sync.md)
 
 ### Phase 1.5 / ticket tbc - Improving output
 
-- various improvements to develop usefulness
-- possible:
-    - work better with bases
-        - id
-        - hl stats?
-            - hl counts
-            - version stats?
-        - podcast name in front matter
-        - cover image url
-    - make hls more useful
-        - metadata as footnotes?
-            - snipd hl link
-            - rw link
-            - id, location, lookup
 
 ### Phase 2 / ticket 81 - capture additional metadata
 
@@ -79,10 +65,36 @@ Reminder for ntlk:
 
 ### Phase 3 / ticket 82 - process and format additonal metadata
 
+
 - use codex locally for extracting useful text from show notes
 - use HTML and playwright screenshot to create a "nice" header for each note
 
-### Phase 4 / ticket 83
+
+### - phase 4 / ticket 84 - add HL metadata
+
+- various improvements to develop usefulness
+- possible:
+    - work better with bases
+        - id
+        - hl stats?
+            - hl counts
+            - version stats?
+        - podcast name in front matter
+        - cover image url
+    - make hls more useful
+        - metadata as footnotes?
+            - snipd hl link
+            - rw link
+            - id, location, lookup
+
+- add HL metadata to each hl
+- probably as linked footnotes
+- possibly include:
+    - location
+    - snipd hl url
+    - highlighted at
+
+### Phase 5 / ticket 83
 
 - intergrate all the pieces
 - refactor as sensible (e.g. combine with roam code, possibly?)
