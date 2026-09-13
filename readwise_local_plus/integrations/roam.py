@@ -173,7 +173,7 @@ class RoamClient:
                 logger.debug("Invalid Retry-After header from Roam: %s", retry_after)
 
         # Simple exponential backoff with a little jitter.
-        delay = self.BASE_BACKOFF_SECONDS * (2 ** attempt)
+        delay = self.BASE_BACKOFF_SECONDS * (2**attempt)
         return delay + random.uniform(0, 1)
 
     def _post(self, endpoint: str, payload: dict[str, Any]) -> Any:

@@ -51,15 +51,15 @@ q = "[ :find ?page-title :in $ ?target-uid :where [?blocks :block/uid ?target-ui
 
 # Return all attributes of an entity-id
 q = "[:find ?e ?attr ?val :in $ ?uid :where [?e :block/uid ?uid] [?e ?attr ?val]]"
-# {'result': [[235747, 'block/parents', 213878], [235747, 'edit/user', 234344], [235747, 'edit/time', 1755953526562], 
-# [235747, 'block/string', 'Block added on Sat 23rd Aug'], [235747, 'block/open', True], [235747, 'block/page', 213878], 
-# [235747, 'create/time', 1755953526562], [235747, 'block/order', 3], 
+# {'result': [[235747, 'block/parents', 213878], [235747, 'edit/user', 234344], [235747, 'edit/time', 1755953526562],
+# [235747, 'block/string', 'Block added on Sat 23rd Aug'], [235747, 'block/open', True], [235747, 'block/page', 213878],
+# [235747, 'create/time', 1755953526562], [235747, 'block/order', 3],
 # [235747, 'block/uid', 'CRRAdcSIh'], [235747, 'create/user', 234344]]}
 
 # General - can return any attribute above
 q = "[ :find ?target-var :in $ ?target-uid :where [?blocks :block/uid ?target-uid] [?blocks :create/user ?target-var]]"
 
-# Entity ID 
+# Entity ID
 q = "[ :find ?attr ?val :in $ ?e :where [?e ?attr ?val] ]"
 
 """multi filter example - ENTITY first...  
@@ -73,19 +73,19 @@ q = "[ :find ?attr ?val :in $ ?e :where [?e ?attr ?val] ]"
 
 # Parent of a block
 q = (
-        "[ :find ?parent-uid :in $ ?target-uid :where [?blocks :block/uid ?target-uid]" 
-        "[?blocks :block/parents ?parents][?parents :node/title ?block-text]]"
+    "[ :find ?parent-uid :in $ ?target-uid :where [?blocks :block/uid ?target-uid]"
+    "[?blocks :block/parents ?parents][?parents :node/title ?block-text]]"
 )
 
 # Text of af all immediate child blocks on a page
 q = (
-        "[ :find ?block-text :in $ ?target-uid :where" 
-        "[?page :block/uid ?target-uid][?page :block/children ?children]"
-        "[?children :block/string ?block-text]]"
+    "[ :find ?block-text :in $ ?target-uid :where"
+    "[?page :block/uid ?target-uid][?page :block/children ?children]"
+    "[?children :block/string ?block-text]]"
 )
 
 # Get all text on a page recursive, pass rules as a second argument
-q7= """[:find ?title ?descendant_uid ?descendant_text
+q7 = """[:find ?title ?descendant_uid ?descendant_text
          :in $ ?page_uid %
          :where
         [?page :block/uid ?page_uid]
@@ -110,11 +110,17 @@ Use with `_pull` endpoint in Roam client.
 
 ```python
 # all_block_attributes_and_children
-q = {"eid": f'[:block/uid "{example_block_uid}"]', "selector": "[:* {:block/children [:*]}]"}
+q = {
+    "eid": f'[:block/uid "{example_block_uid}"]',
+    "selector": "[:* {:block/children [:*]}]",
+}
 # all_block_attributes
 q = {"eid": f'[:block/uid "{example_block_uid}"]', "selector": "[:*]"}
 # page_name_or_block_text
-q = {"eid": f'[:block/uid "{example_block_uid}"]', "selector": "[:block/uid :node/title :block/string]"}
+q = {
+    "eid": f'[:block/uid "{example_block_uid}"]',
+    "selector": "[:block/uid :node/title :block/string]",
+}
 ```
 
 

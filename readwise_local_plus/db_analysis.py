@@ -1,6 +1,7 @@
 """
 Functions to interrogate the local readwise database.
 """
+
 import inspect
 import logging
 from datetime import datetime
@@ -19,28 +20,31 @@ def ordered_property(order):
     """
     Decorator to order class properties.
     """
+
     def decorator(func):
         func.order = order
         return property(func)
+
     return decorator
 
 
 class DbHlsAnalysis:
     """
     Methods and attributes for analysising a DbHls export.
-    
-    Driver function `self.all_stats` generates stats by calling functions that 
-    loop over different groupings of Hls (e.g. by book, by snipd url, by  
+
+    Driver function `self.all_stats` generates stats by calling functions that
+    loop over different groupings of Hls (e.g. by book, by snipd url, by
     snipd url, location and highlighted time). Stats are added as attrs to
     the object.
 
-    Stats are most easily output by creating properties which are 
-    automatically  output via `self.print_analysis`. 
+    Stats are most easily output by creating properties which are
+    automatically  output via `self.print_analysis`.
 
     Attributes
     ----------
 
     """
+
     def __init__(self, dbhls: DbHls):
         self.dbhls = dbhls
         # Does this list book urls? And it's just random non duplicates. Count better?
@@ -54,16 +58,22 @@ class DbHlsAnalysis:
         self.snipd_hls_no_created_at: list[HighlightFromDb] = []
         self.snipd_hls_no_snipd_url: list[HighlightFromDb] = []
         self.snipd_episode_book_counts = {}
-        self.snipd_hls_url_hl_at_mismatch: list[tuple[HighlightFromDb, HighlightFromDb]] = []
-        #-------------------------------------
+        self.snipd_hls_url_hl_at_mismatch: list[
+            tuple[HighlightFromDb, HighlightFromDb]
+        ] = []
+        # -------------------------------------
         self.snipd_hls_by_location: dict[str, dict[int, list[HighlightFromDb]]] = {}
-        self.snipd_hls_by_location_and_hl_at: dict[str, dict[int, list[HighlightFromDb]]] = {}
-        self.snipd_location_duplicates_by_snipd_url: dict[str, dict[int, list[HighlightFromDb]]] = {}
+        self.snipd_hls_by_location_and_hl_at: dict[
+            str, dict[int, list[HighlightFromDb]]
+        ] = {}
+        self.snipd_location_duplicates_by_snipd_url: dict[
+            str, dict[int, list[HighlightFromDb]]
+        ] = {}
         self.snipd_duplicate_locations_2: int = 0
-        #-------------------------------------
+        # -------------------------------------
         self._all_stats()
 
-#--------------------------------------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------------------------------------------------------
 
     @ordered_property(130)
     def snipd_duplicate_locations_from_hls_by_location(self):
@@ -74,7 +84,6 @@ class DbHlsAnalysis:
         duplicate_locations = 0
         for eps_hls_by_location in self.snipd_hls_by_location.values():
             for location, hls in eps_hls_by_location.items():
-
                 # For location, group unique `highlighted_at`s
                 highlighted_ats = set()
 
@@ -83,11 +92,11 @@ class DbHlsAnalysis:
 
                 # If all `highlighted_at`s the same: multiple versions of
                 # same Hl. If more than one `highlighted_at` different
-                # Hl(s) at the same location. 
+                # Hl(s) at the same location.
                 if len(highlighted_ats) > 1:
                     # Total all Hls with different `highlighted_at`
                     # Exclude an (abitrary) "original" for duplicate count
-                    duplicate_locations += (len(highlighted_ats) - 1) 
+                    duplicate_locations += len(highlighted_ats) - 1
 
         return duplicate_locations
 
@@ -99,10 +108,13 @@ class DbHlsAnalysis:
 
         """
         total_hls = 0
-        for snipd_url, hls_by_location_and_hl_at in self.snipd_location_duplicates_by_snipd_url.items():
+        for (
+            snipd_url,
+            hls_by_location_and_hl_at,
+        ) in self.snipd_location_duplicates_by_snipd_url.items():
             for location, hls_by_hl_at in hls_by_location_and_hl_at.items():
                 for hl_at, hls in hls_by_hl_at.items():
-                    total_hls += (len(hls) - 1)
+                    total_hls += len(hls) - 1
         return total_hls
 
     @ordered_property(150)
@@ -113,11 +125,11 @@ class DbHlsAnalysis:
         return len(self.snipd_location_duplicates_by_snipd_url)
 
     def _group_snipd_episode_hls_by_location(
-            self, snipd_episode: SnipdEpisodeFromDb
-        ) -> None:
+        self, snipd_episode: SnipdEpisodeFromDb
+    ) -> None:
         """
         ORIGINAL METHOD
-        
+
         Creates a new grouping for each `SnipdEpisodeFrimDb`:
                     -> All Hls
                         -> locations
@@ -135,8 +147,8 @@ class DbHlsAnalysis:
         self.snipd_hls_by_location[snipd_episode.snipd_url] = hls_by_location
 
     def _group_snipd_episode_hls_by_location_and_highlighted_at_and_missing_locations(
-            self, snipd_episode: SnipdEpisodeFromDb
-        ) -> None:
+        self, snipd_episode: SnipdEpisodeFromDb
+    ) -> None:
         """
         NEW METHOD
 
@@ -148,28 +160,37 @@ class DbHlsAnalysis:
 
         So a positive is any location with multiple `highlighted_at` keys -
         the count of them would be the unique hls.
-        
+
         Adds this `self.snipd_hls_by_location`.
         """
-        hls_by_location_and_highlighted_at: dict[int, dict[datetime, list[HighlightFromDb]]] = {}
-        location_duplicates_hls_by_location_and_highlighted_at: dict[str, dict[datetime, list[HighlightFromDb]]] = {}
+        hls_by_location_and_highlighted_at: dict[
+            int, dict[datetime, list[HighlightFromDb]]
+        ] = {}
+        location_duplicates_hls_by_location_and_highlighted_at: dict[
+            str, dict[datetime, list[HighlightFromDb]]
+        ] = {}
 
         for hl in snipd_episode.hls:
             location = hls_by_location_and_highlighted_at.setdefault(hl.location, {})
             highlights = location.setdefault(hl.highlighted_at, [])
             highlights.append(hl)
 
-        self.snipd_hls_by_location_and_hl_at[snipd_episode.snipd_url] = hls_by_location_and_highlighted_at
+        self.snipd_hls_by_location_and_hl_at[snipd_episode.snipd_url] = (
+            hls_by_location_and_highlighted_at
+        )
 
         for location, hls_by_hl_at in hls_by_location_and_highlighted_at.items():
             if len(hls_by_hl_at) > 1:
-                location_duplicates_hls_by_location_and_highlighted_at[location] = hls_by_hl_at
+                location_duplicates_hls_by_location_and_highlighted_at[location] = (
+                    hls_by_hl_at
+                )
 
         if location_duplicates_hls_by_location_and_highlighted_at:
-            self.snipd_location_duplicates_by_snipd_url[snipd_episode.snipd_url] = location_duplicates_hls_by_location_and_highlighted_at   
+            self.snipd_location_duplicates_by_snipd_url[snipd_episode.snipd_url] = (
+                location_duplicates_hls_by_location_and_highlighted_at
+            )
 
-
-#--------------------------------------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------------------------------------------------------
     def print_properties(self):
         """
         Print the available properites.
@@ -178,7 +199,9 @@ class DbHlsAnalysis:
         structured with properties followed by the method that
         generates the objects the property is calculated on.
         """
-        for name, prop in inspect.getmembers(type(self), lambda x: isinstance(x, property)):
+        for name, prop in inspect.getmembers(
+            type(self), lambda x: isinstance(x, property)
+        ):
             print("---")
             print(prop.fget.__name__)
 
@@ -188,11 +211,13 @@ class DbHlsAnalysis:
         """
         print(
             f"==== SUMMARY STATS FOR '{self.dbhls.query_shortname}'"
-            f" ON {datetime.now().isoformat(sep=" ", timespec="minutes")} ====\n"
+            f" ON {datetime.now().isoformat(sep=' ', timespec='minutes')} ====\n"
         )
 
         # Gather and apply sorting via order_property decorator
-        class_properties = inspect.getmembers(type(self), lambda x: isinstance(x, property))
+        class_properties = inspect.getmembers(
+            type(self), lambda x: isinstance(x, property)
+        )
         class_properties.sort(key=lambda item: getattr(item[1].fget, "order", 999))
 
         for name, prop in class_properties:
@@ -203,11 +228,11 @@ class DbHlsAnalysis:
     def output_hls_missing_location_and_not_ai_notes(self) -> list[HighlightFromDb]:
         """
         Return hls missing location that are (probably) NOT episode ai notes.
-        
+
         Returns
         -------
         list[HighlightFromDB]
-            Requires manual printing etc. Not clear what ideal output is so 
+            Requires manual printing etc. Not clear what ideal output is so
             returns the highlights themselves.
         """
         result = []
@@ -230,12 +255,10 @@ class DbHlsAnalysis:
         Generate stats created by looping over `self.hls_by_book`.
         """
         for book in self.dbhls.hls_by_book:
-
             self._generate_snipd_episode_stats(book)
             self._generate_snipd_book_url_mismatch_stats(book)
 
             for hl in book.highlights:
-
                 self._generate_snipd_hl_missing_location_stats(hl)
                 self._generate_snipd_hl_missing_date_stats(hl)
                 self._generate_snipd_hl_missing_url_stats(hl)
@@ -243,15 +266,17 @@ class DbHlsAnalysis:
     def _all_snipd_stats_on_hls_by_snipd_url(self):
         """
         Genearate stats created by looping over `self.hls_by_snipd_url`.
-        """    
+        """
         for snipd_episode in self.dbhls.hls_by_snipd_url:
             self._generate_snipd_unique_episode_book_counts(snipd_episode)
             self._analyse_hl_snipd_urls(snipd_episode)
             self._group_snipd_episode_hls_by_location(snipd_episode)
-            self._group_snipd_episode_hls_by_location_and_highlighted_at_and_missing_locations(snipd_episode)
+            self._group_snipd_episode_hls_by_location_and_highlighted_at_and_missing_locations(
+                snipd_episode
+            )
 
-#----------- SORT BY PROPERTY AND METHOD THAT GENERATES STATS FOR PROPERTY  ---------
-    
+    # ----------- SORT BY PROPERTY AND METHOD THAT GENERATES STATS FOR PROPERTY  ---------
+
     # Property requires no generator method
     @ordered_property(10)
     def snipd_episodes(self) -> None:
@@ -259,9 +284,10 @@ class DbHlsAnalysis:
         1. Total Snipd highlights:
         """
         count = sum(
-            len(book.highlights) for book in self.dbhls.hls_by_book
+            len(book.highlights)
+            for book in self.dbhls.hls_by_book
             if book.source == "snipd"
-            ) 
+        )
         return count
 
     # Property requires not generator method
@@ -271,7 +297,6 @@ class DbHlsAnalysis:
         2. Total Snipd podcast episodes:
         """
         return len(self.dbhls._hls_by_book_dict)
-
 
     @ordered_property(30)
     def snipd_unique_episodes(self) -> int:
@@ -292,14 +317,13 @@ class DbHlsAnalysis:
         Count unique snipd episodes.
 
         TODO: duplicate_book_ids is only the "second" book, arbitrarily,
-        TODO: depending on the sort used. If books are sorted, then 
+        TODO: depending on the sort used. If books are sorted, then
         TODO: this is probably fine.
         """
         if book.source_url in self.snipd_book_urls:
             self.snipd_duplicate_book_ids.append(book.user_book_id)
         else:
             self.snipd_book_urls.append(book.source_url)
-
 
     @ordered_property(50)
     def snipd_url_mismatches(self) -> int:
@@ -314,7 +338,6 @@ class DbHlsAnalysis:
         """
         if book.source_url != book.unique_url:
             self.snipd_books_url_mismatch += 1
-
 
     @ordered_property(60)
     def snipd_hls_missing_location(self) -> int:
@@ -342,7 +365,6 @@ class DbHlsAnalysis:
             if hl.text.startswith("Episode AI notes"):
                 self.snipd_hls_no_location_ai_notes.append(hl)
 
-
     @ordered_property(80)
     def snipd_hls_missing_highlighted_at_date(self) -> int:
         """
@@ -366,7 +388,6 @@ class DbHlsAnalysis:
         if not hl.created_at:
             self.snipd_hls_no_created_at.append(hl)
 
-
     @ordered_property(100)
     def snipd_hls_missing_snipd_url(self) -> int:
         """
@@ -381,22 +402,25 @@ class DbHlsAnalysis:
         if not hl.url:
             self.snipd_hls_no_snipd_url.append(hl)
 
-
     @ordered_property(110)
     def snipd_unique_episode_book_counts(self) -> str:
         """
         11. Counts of total books per unique snipd url. (i.e. number of duplicate books).
         """
         result = "\n"
-        for num_of_episodes, num_of_books in sorted(self.snipd_episode_book_counts.items()):
-            result += (f"{num_of_episodes} episodes duplicated in {num_of_books} books\n")
+        for num_of_episodes, num_of_books in sorted(
+            self.snipd_episode_book_counts.items()
+        ):
+            result += f"{num_of_episodes} episodes duplicated in {num_of_books} books\n"
 
         total_books = sum([(k * v) for k, v in self.snipd_episode_book_counts.items()])
         result += f"\nTotal snipd books: {total_books}"
 
         return result
 
-    def _generate_snipd_unique_episode_book_counts(self, snipd_episode: SnipdEpisodeFromDb):
+    def _generate_snipd_unique_episode_book_counts(
+        self, snipd_episode: SnipdEpisodeFromDb
+    ):
         book_count = len(snipd_episode.books)
         current_tally = self.snipd_episode_book_counts.get(book_count)
 
@@ -404,7 +428,6 @@ class DbHlsAnalysis:
             self.snipd_episode_book_counts[book_count] = current_tally + 1
         else:
             self.snipd_episode_book_counts[book_count] = 1
-
 
     @ordered_property(120)
     def snip_highlighted_at_mismatch_hl_url(self) -> int:
@@ -417,11 +440,11 @@ class DbHlsAnalysis:
         """
         `hl.url` behaves identically to `highlighted_at` for Hl version tracking.
 
-        Iterate over all Hls from all Books for a Snipd Episode. Add unique 
+        Iterate over all Hls from all Books for a Snipd Episode. Add unique
         `highlighted_at`s to a tracker. Makes a list to count and for easy
         future analysis (although see below note for accuracy).
 
-        Hls have unique urls in the form: `https://share.snipd.com/snip/<uid>` 
+        Hls have unique urls in the form: `https://share.snipd.com/snip/<uid>`
         compared to episode/books where <snip> is replaced with <episode>.
 
         We prefer `highlighted_at` as a) it gives additional context and b)
@@ -430,7 +453,6 @@ class DbHlsAnalysis:
         """
         tracker: dict[datetime, HighlightFromDb] = {}
         for hl in snipd_episode.hls:
-
             # Add unseen `highlighted_at`s to `tracker`
             if hl.highlighted_at not in tracker:
                 tracker[hl.highlighted_at] = hl

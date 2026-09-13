@@ -18,25 +18,27 @@ PODCAST_TITLE_MAP = {
 
 def ensure_dir_exists(dir_path: Path, parents: bool = False) -> None:
     if not dir_path.is_dir():
-        dir_path.mkdir(parents=parents) # Error if exists, or parents don't exist
+        dir_path.mkdir(parents=parents)  # Error if exists, or parents don't exist
         logger.info(f"Created dir: {dir_path}")
 
 
 def ensure_readwise_dirs(
-        user_config: UserConfig, category_dirs: list[int] = REQUIRED_CATEGORY_DIRS
-    ) -> None:
+    user_config: UserConfig, category_dirs: list[int] = REQUIRED_CATEGORY_DIRS
+) -> None:
     """
     Create Readwise and category dirs, if not present.
     """
     # This will create the Readwise dir if it doesn't exist also.
     for category_folder in category_dirs:
         expected_path = user_config.obsidian_rw_dir / category_folder
-        ensure_dir_exists(expected_path, True)        
+        ensure_dir_exists(expected_path, True)
 
 
 def write_dbhls_to_obsidian(
-        user_config: UserConfig, query_shortname: str, batch_id: int | str,
-    ) -> None:
+    user_config: UserConfig,
+    query_shortname: str,
+    batch_id: int | str,
+) -> None:
     """
     Entry point function to write a batch of highlights to Obsidian.
 
@@ -56,7 +58,6 @@ def write_dbhls_to_obsidian(
     # TODO: Add output from analysis obj for monitoring?
 
     for snipd_ep in dbhls.hls_by_snipd_url:
-
         snipd_ep.populate()
 
         # `podcasts` aka BookFromDb.category is hardcoded for consistency
@@ -65,13 +66,19 @@ def write_dbhls_to_obsidian(
 
         episode_file = podcast_dir / (snipd_ep.episode_title + ".md")
 
-
         if not episode_file.exists():
-            logger.info("Episode created: %s | %s", snipd_ep.podcast_title, episode_file.name)
+            logger.info(
+                "Episode created: %s | %s", snipd_ep.podcast_title, episode_file.name
+            )
         else:
-            logger.info("Episode overwritten: %s | %s", snipd_ep.podcast_title, episode_file.name)
+            logger.info(
+                "Episode overwritten: %s | %s",
+                snipd_ep.podcast_title,
+                episode_file.name,
+            )
 
         episode_file.write_text(snipd_ep.full_page)
+
 
 if __name__ == "__main__":
     # Use for experimentation/development of the `db_export.py`.
@@ -87,7 +94,7 @@ if __name__ == "__main__":
     # batch_id = "all" # ~890 snipd books
     # batch_id = 110 # 0 snipd books
     # batch_id = 111 # 376 snipd books
-    batch_id = 112 # 1 snipd books
+    batch_id = 112  # 1 snipd books
     # batch_id = 113 # 10 snipd books
 
     write_dbhls_to_obsidian(user_config, query_shortname, batch_id)

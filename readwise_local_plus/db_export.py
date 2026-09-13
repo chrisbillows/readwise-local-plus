@@ -1,15 +1,16 @@
 """
 Classes and helpers for working with db data for read-online processing.
 
-These classes should replicate (and expand) the SQL Alchemy ORM objects 
+These classes should replicate (and expand) the SQL Alchemy ORM objects
 for "read-only" use i.e. where nothing ever needs writing back to the
 database.
 
 The primary classes `BookFromDb` and `HighlightFromDb` are exhaustive: they
-include all data from the `Book` and `Highlight` ORM models, as well as 
+include all data from the `Book` and `Highlight` ORM models, as well as
 additional fields required (or useful) for any workflow. Create workflow
 specific objects if performance is an issue.
 """
+
 from __future__ import annotations
 
 import logging
@@ -53,13 +54,8 @@ def dataclass_from_orm(cls: type[T], orm_object: Base, **overrides: Any) -> T:
     values.update(overrides)
 
     if is_dataclass(cls):
-        init_fields = {
-            field.name for field in fields(cls) if field.init
-        }
-        kwargs = {
-            name: values[name]
-            for name in init_fields if name in values
-        }
+        init_fields = {field.name for field in fields(cls) if field.init}
+        kwargs = {name: values[name] for name in init_fields if name in values}
     else:
         kwargs = values
 
@@ -70,7 +66,7 @@ class DbHls:
     # Key is shortname : string, value is a db query : Select[tuple[Highlight]]
     # NOTE: This query is extended if a batch_id is passed in `DbHls._build_db_query`
     DB_QUERIES = {
-        "snipd" : (
+        "snipd": (
             select(Highlight)
             .join(Highlight.book)
             .join(Highlight.batch)
@@ -135,7 +131,7 @@ class DbHls:
             Hls grouped into unique episodes by snipd URL as a list.
         """
         self.query_shortname: str = query_shortname
-        self.batch_id: int| None = batch_id 
+        self.batch_id: int | None = batch_id
         self.db_query: Select[tuple[Highlight]] = self.DB_QUERIES[query_shortname]
         self.user_config: UserConfig = fetch_user_config()
         self.db_path: Path = self.user_config.db_path
@@ -212,7 +208,7 @@ class DbHls:
         except KeyError as err:
             logger.error(
                 "The `query_shortname` %r was not found in DB_QUERIES.",
-                self.query_shortname
+                self.query_shortname,
             )
             raise err
 
@@ -222,10 +218,7 @@ class DbHls:
         if self.batch_id != "all":
             affected_episode_urls = (
                 select(Book.source_url)
-                .join(
-                    Highlight,
-                    Highlight.book_id == Book.user_book_id
-                )
+                .join(Highlight, Highlight.book_id == Book.user_book_id)
                 .where(
                     Highlight.batch_id == self.batch_id,
                     Book.category == "podcasts",
@@ -233,9 +226,7 @@ class DbHls:
                 )
             )
 
-            query = query.where(
-                Book.source_url.in_(affected_episode_urls)
-            )
+            query = query.where(Book.source_url.in_(affected_episode_urls))
 
         self.db_query = query
 
@@ -246,7 +237,7 @@ class DbHls:
         Creates a dictionary where the key is a book id and the value is
         a BookFromDB with highlights as an attribute. This is a de facto
         "standard" export format which can be readily reformatted without
-        requiring a SQL Alchemy session. 
+        requiring a SQL Alchemy session.
         """
         with get_session(self.db_path) as session:
             for highlight in session.scalars(self.db_query):
@@ -260,7 +251,7 @@ class DbHls:
                         highlight.book,
                         import_date=highlight.book.batch.database_write_time,
                         snipd_uid=snipd_uid,
-                        snipd_url=highlight.book.source_url
+                        snipd_url=highlight.book.source_url,
                     )
                     self._hls_by_book_dict[book_id] = book
 
@@ -322,9 +313,7 @@ class DbHls:
                 else:
                     book.highlights.sort(key=lambda hl: hl.highlighted_at)
                     snipd_episode = SnipdEpisodeFromDb(
-                        snipd_url=book.source_url,
-                        snipd_uid=snipd_uid,
-                        books=[book]
+                        snipd_url=book.source_url, snipd_uid=snipd_uid, books=[book]
                     )
                     cache[snipd_uid] = snipd_episode
 
@@ -332,19 +321,19 @@ class DbHls:
 
     @staticmethod
     def _get_hl_processor(hl: HighlightFromDb) -> T:
-            """
-            Generate a processor for the Hl for a given workflow.
+        """
+        Generate a processor for the Hl for a given workflow.
 
-            If the Hl is not exported as part of the workflow, set to `None`.     
-            """
-            if hl.snipd_hl_type == "transcript":
-                fmtr_ins = SnipdTranscriptFmtr(hl)
-            elif hl.snipd_hl_type == "episode-ai-notes":
-                fmtr_ins = SnipdAiEpisodeNotesFmtr(hl)
-            else:
-                fmtr_ins = None
+        If the Hl is not exported as part of the workflow, set to `None`.
+        """
+        if hl.snipd_hl_type == "transcript":
+            fmtr_ins = SnipdTranscriptFmtr(hl)
+        elif hl.snipd_hl_type == "episode-ai-notes":
+            fmtr_ins = SnipdAiEpisodeNotesFmtr(hl)
+        else:
+            fmtr_ins = None
 
-            return fmtr_ins
+        return fmtr_ins
 
     def _sort_and_filter_highlights_for_snipd(hl: HighlightFromDb) -> HighlightFromDb:
         """
@@ -393,18 +382,19 @@ class HighlightFromDb:
     are generated here to faciliate reusability across workflows.
 
     NOTE: For Snipd, both Episodes (i.e. Books) and Hls have their own URLs
-    and UIDs. Both are available on the object. The Hl URL is `self.url` 
+    and UIDs. Both are available on the object. The Hl URL is `self.url`
     and the episode/book url is `self.book_snipd_url`. Examples:
 
     - `https://share.snipd.com/episode/<uid>`
     - `https://share.snipd.com/snip/<uid>`
-    
+
 
     Parameters (notable only - most duplicate ORM model Highlight)
     --------------------------------------------------------------
     book_snipd_url : str
-        Technically the Book's `source_url` added for developer ergonomics. 
+        Technically the Book's `source_url` added for developer ergonomics.
     """
+
     def __init__(
         self,
         id: int,
@@ -412,7 +402,7 @@ class HighlightFromDb:
         batch_id: int,
         text: str,
         location: int | None,
-        location_type: str | None, 
+        location_type: str | None,
         note: str | None,
         color: str | None,
         highlighted_at: datetime | None,
@@ -431,7 +421,7 @@ class HighlightFromDb:
         import_date: datetime,
         book_snipd_url: str | None,
         book_snipd_uid: str | None,
-        ):
+    ):
         # Table fields
         self.id: int = id
         self.book_id: int = book_id
@@ -455,11 +445,11 @@ class HighlightFromDb:
         self.validation_errors: dict[str, str] = validation_errors
         # Additional fields
         self.book_source: str | None = book_source
-        self.import_date: datetime = import_date 
+        self.import_date: datetime = import_date
         self.book_snipd_url: str | None = book_snipd_url
         self.book_snipd_uid: str | None = book_snipd_uid
         self.hl_type: str | None = None
-        self.snipd_hl_type: str| None = None
+        self.snipd_hl_type: str | None = None
         self.fmtd: FmtdHl | None = None
 
     def _populate(self) -> None:
@@ -491,28 +481,28 @@ class HighlightFromDb:
         """
         if self.hl_type != "snipd":
             type = None
-        
+
         elif "Transcript:" in self.text and "Episode AI notes" in self.text:
             warning_msg = (
-                "Highlight id: " +
-                str(self.id) +
-                " in book id: " +
-                str(self.user_book_id) +
-                " has 'Transcript:' and 'Episode AI notes' strs. Did not process."
-                )
+                "Highlight id: "
+                + str(self.id)
+                + " in book id: "
+                + str(self.user_book_id)
+                + " has 'Transcript:' and 'Episode AI notes' strs. Did not process."
+            )
             logger.warning(warning_msg)
             type = "do-not-process"
-            
+
         elif "Transcript:" in self.text:
             type = "transcript"
-    
+
         elif "Episode AI notes" in self.text:
             type = "episode-ai-notes"
-    
+
         else:
             type = "do-not-process"
 
-        self.snipd_hl_type = type   
+        self.snipd_hl_type = type
 
     def __repr__(self) -> str:
         return f"HL(id:{self.id})"
@@ -563,7 +553,7 @@ class SnipdEpisodeFromDb:
     """
     Grouping of Books from the same snipd episode.
 
-    Snipd episodes are unique based on snipd url (or the derived snipd uid). Class 
+    Snipd episodes are unique based on snipd url (or the derived snipd uid). Class
     groups those books together. For ease of development, instantiated as a list of
     books to allow access to any required book metadata.
     """
@@ -576,7 +566,7 @@ class SnipdEpisodeFromDb:
 
     def __init__(self, snipd_url: str, snipd_uid: str, books: list[BookFromDb]):
         """
-        
+
         Parameters
         ----------
         snipd_url : str
@@ -587,7 +577,7 @@ class SnipdEpisodeFromDb:
             All books that share the same snipd_url (as `source_url`). Hls
             may be duplicates/versions or may not. Books are sorted oldest
             to newest.
-        
+
         Attributes
         ----------
         full_page : str
@@ -605,7 +595,7 @@ class SnipdEpisodeFromDb:
         episode_title : str
             Obsidian safe podcast episode title.
         page_front_matter : str
-            The front matter block as a string with newlines.        
+            The front matter block as a string with newlines.
         page_body : str
             The fmtd Hls output by a Fmtr, incrementally added into
             a string with newlines.
@@ -652,21 +642,31 @@ class SnipdEpisodeFromDb:
             uid = hl.url.replace("//", "/").split("/")[3][:12]
             print(
                 f"{hl.location:5}      "
-                f"{hl.highlighted_at.isoformat(timespec='minutes', sep=" ")}      "
+                f"{hl.highlighted_at.isoformat(timespec='minutes', sep=' ')}      "
                 f"{hl.created_at.isoformat(timespec='minutes')}      {uid}"
             )
 
         snipd_hl_debug = False
         if snipd_hl_debug:
-            print(f"===== {self.books[-1].user_book_id} | {self.books[-1].title} ======")
-            print("\n-------------------------------all_hls ---------------------------")
-            print("  loc   |    highlighted_at   |     created at     |    snipd_uid \n")
+            print(
+                f"===== {self.books[-1].user_book_id} | {self.books[-1].title} ======"
+            )
+            print(
+                "\n-------------------------------all_hls ---------------------------"
+            )
+            print(
+                "  loc   |    highlighted_at   |     created at     |    snipd_uid \n"
+            )
 
             for hl in self.all_hl_versions:
                 display_hl(hl)
 
-            print("\n---------------------------- sorted dedupes-----------------------")
-            print("  loc   |    highlighted_at   |     created at     |    snipd_uid \n")
+            print(
+                "\n---------------------------- sorted dedupes-----------------------"
+            )
+            print(
+                "  loc   |    highlighted_at   |     created at     |    snipd_uid \n"
+            )
             for hl in deduplicated_hls:
                 display_hl(hl)
 
@@ -703,9 +703,7 @@ class SnipdEpisodeFromDb:
 
         return grouped_by_snipd_url
 
-    def _deduplicate_hls(
-            self, grouped_by_snipd_url: dict[str, list[HighlightFromDb]]
-        ):
+    def _deduplicate_hls(self, grouped_by_snipd_url: dict[str, list[HighlightFromDb]]):
         """
         Deduplicate a  by most recent created_at.
         """
@@ -725,10 +723,10 @@ class SnipdEpisodeFromDb:
         date.
         """
         for hl in self.hls:
-            if hl.snipd_hl_type == 'transcript':
+            if hl.snipd_hl_type == "transcript":
                 self.fmtd_hls.append(hl.fmtd.hl_full)
                 self.page_body += hl.fmtd.hl_full
-            if hl.snipd_hl_type == 'episode-ai-notes':
+            if hl.snipd_hl_type == "episode-ai-notes":
                 self.fmtd_hls.append(hl.hl_full)
                 self.page_body += hl.hl_full
 
@@ -737,9 +735,9 @@ class SnipdEpisodeFromDb:
         Limit length and remove banned obsidian chars from a str.
         """
         if len(s) > 100:
-            s = s[:100] 
+            s = s[:100]
         return s.translate(self.OBS_ILLEGAL_CHARS_TABLE)
-    
+
     def _generate_podcast_title(self) -> None:
         """
         Revise based on `PODCAST_TITLE_MAP` and ensure Obs safe.
@@ -813,6 +811,7 @@ class BaseFmtr(ABC):
     """
     Base class for Hl and Book fmtrs.
     """
+
     def __init__(self, hl: HighlightFromDb | BookFromDb):
         self.hl = hl
 
@@ -826,19 +825,18 @@ class BaseFmtr(ABC):
 
 
 class SnipdTranscriptFmtr(BaseFmtr):
-
     def __init__(self, hl: HighlightFromDb):
         """
         Processor for Snipd Hl of type 'transcript'.
 
-        Mutatates the passed in Hl by adding `FmtHl` object. The `FmtHl` 
-        contains the various fmtd outputs. 
+        Mutatates the passed in Hl by adding `FmtHl` object. The `FmtHl`
+        contains the various fmtd outputs.
 
-        'transcript' Hls includes the text 'Transcript:'. Transcript highlights 
-        are split into: i) summary ii) quotes. The summary is then split 
+        'transcript' Hls includes the text 'Transcript:'. Transcript highlights
+        are split into: i) summary ii) quotes. The summary is then split
         into: a) title b) body
 
-        Each part is formatted and the result is return as `fmtd_hl`. 
+        Each part is formatted and the result is return as `fmtd_hl`.
         Intermediate states are preserved.
 
         Parameters
@@ -850,27 +848,27 @@ class SnipdTranscriptFmtr(BaseFmtr):
         ---------------------
         fmtd: FmtHl()
             A FtmHl object that collects the following state.
-        
+
         Attributes added to `fmtd`
         ------------------------
         summary_title : str
 
         summary_body : str
-            The list of strings, formatted for writing, usually as a bullets 
+            The list of strings, formatted for writing, usually as a bullets
             seperated by newlines.
         quotes : str
 
         quotes_by_speaker : list[tuple[str, str]]
-        
+
         hl_full : str
             The recombined, formatted highlight as a writeable string.
-            
+
         """
         super().__init__(hl)
         self.hl.fmtd = FmtdHl()
 
         self.hl.fmtd.summary_title = ""
-        self.hl.fmtd.summary_body  = ""
+        self.hl.fmtd.summary_body = ""
         self.hl.fmtd.quotes = ""
         self.hl.fmtd.hl_full = ""
 
@@ -881,9 +879,9 @@ class SnipdTranscriptFmtr(BaseFmtr):
         self.hl.fmtd.summary_title_raw = ""
 
         self.hl.fmtd.summary_body_type = ""
-        self.hl.fmtd.summary_body_raw  = []
+        self.hl.fmtd.summary_body_raw = []
 
-        self.hl.fmtd.quotes_by_speaker = [] 
+        self.hl.fmtd.quotes_by_speaker = []
 
     def populate_hl(self):
         """
@@ -892,20 +890,26 @@ class SnipdTranscriptFmtr(BaseFmtr):
         Populates the fmtd object on the passed in Hl.
         """
         self._clean_text()
-        self.hl.fmtd.summary_raw, self.hl.fmtd.quotes_raw = self.hl.fmtd.cleaned_text.split("Transcript:")
-    
+        self.hl.fmtd.summary_raw, self.hl.fmtd.quotes_raw = (
+            self.hl.fmtd.cleaned_text.split("Transcript:")
+        )
+
         self.split_summary_into_title_and_body()
         self.find_summary_body_type()
-    
+
         self._format_summary_title_raw()
         self._format_summary_body_raw()
 
         self._split_quotes_raw_by_speaker()
         self._format_quotes_by_speaker()
-        
+
         self.hl.fmtd.hl_full = (
-            self.hl.fmtd.summary_title + "\n\n" + self.hl.fmtd.summary_body + "\n\n" 
-            + "\n".join(self.hl.fmtd.quotes) + "\n\n"
+            self.hl.fmtd.summary_title
+            + "\n\n"
+            + self.hl.fmtd.summary_body
+            + "\n\n"
+            + "\n".join(self.hl.fmtd.quotes)
+            + "\n\n"
         )
 
     def _clean_text(self) -> None:
@@ -918,7 +922,7 @@ class SnipdTranscriptFmtr(BaseFmtr):
         text = text.replace("•", "-")
         text = text.replace("*", "-")
         self.hl.fmtd.cleaned_text = text
-    
+
     def split_summary_into_title_and_body(self) -> None:
         """
         Split a transcript highlight summary into a `title` and `body`.
@@ -926,15 +930,15 @@ class SnipdTranscriptFmtr(BaseFmtr):
         Returns
         -------
         tuple
-            Where the first item is the highlight title as a string, and then 
+            Where the first item is the highlight title as a string, and then
             second item is the summary bullet points as a list of strings.
         """
         summary = self.hl.fmtd.summary_raw.replace("\n\n", "\n")
         summary_split = summary.split("\n")
 
         self.hl.fmtd.summary_title_raw = summary_split[0]
-        self.hl.fmtd.summary_body_raw = [s for s in summary_split[1:] if s != '']
-    
+        self.hl.fmtd.summary_body_raw = [s for s in summary_split[1:] if s != ""]
+
     def find_summary_body_type(self) -> None:
         """
         The 'type' of a transcript highlight body, for processing.
@@ -945,7 +949,7 @@ class SnipdTranscriptFmtr(BaseFmtr):
         if len(self.hl.fmtd.summary_body_raw) == 0:
             body = "no-body"
 
-        elif self.hl.fmtd.summary_body_raw[0].startswith('-'):
+        elif self.hl.fmtd.summary_body_raw[0].startswith("-"):
             body = "bullets"
 
         elif "Summary:" in self.hl.fmtd.summary_body_raw:
@@ -984,10 +988,9 @@ class SnipdTranscriptFmtr(BaseFmtr):
         Returns
         -------
         str
-            
+
         """
         match self.hl.fmtd.summary_body_type:
-
             case "no-body":
                 body = ""
 
@@ -998,27 +1001,27 @@ class SnipdTranscriptFmtr(BaseFmtr):
                 hl_body = [s for s in self.hl.fmtd.summary_body_raw if s != "Summary:"]
                 bullet_body = self._make_bullets(
                     hl_body, self.hl.fmtd.summary_body_type
-                    )
+                )
                 body = "\n".join(bullet_body)
 
             case "single-block":
                 split_body = self.hl.fmtd.summary_body_raw[0].split(". ")
                 bullet_body = self._make_bullets(
                     split_body, self.hl.fmtd.summary_body_type
-                    )
+                )
                 body = "\n".join(bullet_body)
 
             case "multi-line":
                 bullet_body = self._make_bullets(
                     self.hl.fmtd.summary_body_raw, self.hl.fmtd.summary_body_type
-                    )
+                )
                 body = "\n".join(bullet_body)
 
             case _:
                 print(self.hl.fmtd.summary_body_raw)
                 raise Exception
 
-        self.hl.fmtd.summary_body = body 
+        self.hl.fmtd.summary_body = body
 
     @staticmethod
     def _make_bullets(split_body: list[str], split_body_type: str) -> list[str]:
@@ -1027,7 +1030,7 @@ class SnipdTranscriptFmtr(BaseFmtr):
         """
         bullet_body = []
         for s in split_body:
-            bullet_s = '- ' + s
+            bullet_s = "- " + s
             if split_body_type == "summary":
                 bullet_s += "."
             bullet_body.append(bullet_s)
@@ -1044,7 +1047,7 @@ class SnipdTranscriptFmtr(BaseFmtr):
         <quote>
         ```
 
-        Assumes text was split on 'Transcript:' therefore begins with a newline. 
+        Assumes text was split on 'Transcript:' therefore begins with a newline.
         """
         raw = self.hl.fmtd.quotes_raw
         raw = raw[1:]
@@ -1103,6 +1106,7 @@ class SnipdAiEpisodeNotesFmtr(BaseFmtr):
     """
     Snipd Hl of type `Episode AI Notes`.
     """
+
     def __init__(self, hl: HighlightFromDb):
         super().__init__(hl)
         self.hl = hl
@@ -1123,7 +1127,6 @@ class SnipdAiEpisodeNotesFmtr(BaseFmtr):
 
         fmtd_sentences = []
         for sentence in sentences[1:]:
-
             # Sentences are numbered e.g "1. <sentence>"
             # Count chars that can be cast to digits, up to 9999
             leading_number_chars = 0
@@ -1135,8 +1138,8 @@ class SnipdAiEpisodeNotesFmtr(BaseFmtr):
                 leading_number_chars += 1
 
             # The `+ 2` target the ". " follow the leading number chars.
-            sentence_without_num = sentence[(leading_number_chars + 2):]
-            sentence_by_word= sentence_without_num.replace("  ", " ").split(" ")
+            sentence_without_num = sentence[(leading_number_chars + 2) :]
+            sentence_by_word = sentence_without_num.replace("  ", " ").split(" ")
 
             # if "10." in sentence and "Gwyneth" in sentence:
             #     breakpoint()
@@ -1147,14 +1150,13 @@ class SnipdAiEpisodeNotesFmtr(BaseFmtr):
 
             # Bullet and bold first five words, add ellipsis.
             # Indent remaining text under first bullet.
-            sentence_by_word[0] = '- ***' + sentence_by_word[0]
+            sentence_by_word[0] = "- ***" + sentence_by_word[0]
             sentence_by_word[5] = sentence_by_word[5] + "..." + "***\n  -"
 
-            fmtd_sentence =  " ".join(sentence_by_word)
+            fmtd_sentence = " ".join(sentence_by_word)
             fmtd_sentences.append(fmtd_sentence)
 
-
-        self.hl.hl_full = fmtd_title +"\n" + "\n\n".join(fmtd_sentences) + "\n\n"
+        self.hl.hl_full = fmtd_title + "\n" + "\n\n".join(fmtd_sentences) + "\n\n"
 
 
 # There is a configured `if __name__ == `__main__` for development in `obsidian_snipd.py`.

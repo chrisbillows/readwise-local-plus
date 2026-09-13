@@ -90,7 +90,6 @@ we want to be able to flexibly format THIS
 @dataclass
 def formatting_target():
     header
-
 ```
 
 

@@ -162,9 +162,11 @@ def main(user_config: Optional[UserConfig] = None) -> None:
     args = parse_args()
 
     if args.command == "sync":
-
         if args.batch_id is not None:
-            logger.info("Writing qualifying HLs in batch %s to Roam and Obsidian.", args.batch_id)
+            logger.info(
+                "Writing qualifying HLs in batch %s to Roam and Obsidian.",
+                args.batch_id,
+            )
             write_batch_to_daily_notes(args.batch_id)
             write_dbhls_to_obsidian(user_config, "snipd", args.batch_id)
 

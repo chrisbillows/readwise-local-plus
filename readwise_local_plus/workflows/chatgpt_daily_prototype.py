@@ -240,13 +240,14 @@ class DbDNState:
         The roam block uid if the header has already been written, else None.
     book_header_uids : dict[int, str]
         A dict of existing book headers where the key is the 'user_book_id' and the
-        value is the roam block uid. Will be an empty dict if no book headers exist. 
-    highlight_ids : set[int] 
-        A set of Readwise highlight 'id' already exported for this page. Will be an 
-        empty set if no highlights exist. 
-        NOTE: Stores ids only. We never use highlights as parents for new objects 
+        value is the roam block uid. Will be an empty dict if no book headers exist.
+    highlight_ids : set[int]
+        A set of Readwise highlight 'id' already exported for this page. Will be an
+        empty set if no highlights exist.
+        NOTE: Stores ids only. We never use highlights as parents for new objects
         (i.e. a new note on an existing highlight is currently not written).
     """
+
     page_uid: str
     page_exists: bool
     rw_header_uid: str | None
@@ -320,6 +321,7 @@ class RoamExportNodeBuilder:
             highlight_id=highlight_id,
         )
 
+
 class DNExporter:
     def __init__(
         self,
@@ -364,7 +366,7 @@ class DNExporter:
             re_node.resolve(tempid_map)
 
         return self.hl_re_nodes, self.link_re_nodes
-    
+
     def _build_hl_roam_export_nodes(self) -> None:
         if self.state.rw_header_uid is not None:
             header_uid = self.state.rw_header_uid
@@ -433,14 +435,18 @@ class DNExporter:
         page_tree = self._rc.fetch_block_subtree(self.state.page_uid) or {}
         page_children = page_tree.get("children", [])
         links_header_uid, header_children = self._get_or_create_child(
-            page_children, self.state.page_uid, READWISE_LINKS, "links_header",
+            page_children,
+            self.state.page_uid,
+            READWISE_LINKS,
+            "links_header",
         )
 
         for book in self.books:
             book_uid = self._resolve_book_uid(book.user_book_id)
             book_link_header = f"(({book_uid}))"
             book_link_header_uid, _ = self._get_or_create_child(
-                header_children, links_header_uid,
+                header_children,
+                links_header_uid,
                 book_link_header,
                 "book_link_header",
                 book.user_book_id,
@@ -467,14 +473,18 @@ class DNExporter:
 
         highlight_ids = {
             row.highlight_id
-            for row in self._session.query(RoamHighlightExport).filter_by(page_uid=page_uid)
+            for row in self._session.query(RoamHighlightExport).filter_by(
+                page_uid=page_uid
+            )
         }
 
         return DbDNState(
             page_uid=page_uid,
             page_exists=(known_page is not None or existing_page is not None),
             rw_header_uid=(
-                existing_page.highlights_header_uid if existing_page is not None else None
+                existing_page.highlights_header_uid
+                if existing_page is not None
+                else None
             ),
             book_header_uids=existing_book_header_uids,
             highlight_ids=highlight_ids,
@@ -628,10 +638,7 @@ class DNExportWriteback:
                     )
                 )
 
-            elif (
-                action.kind == "highlight"
-                and action.highlight_id is not None
-            ):
+            elif action.kind == "highlight" and action.highlight_id is not None:
                 self._session.add(
                     RoamHighlightExport(
                         highlight_id=action.highlight_id,
@@ -734,7 +741,7 @@ def write_batch_to_daily_notes(batch_id: int) -> None:
         dn_export = DNExporter(target_date, books, rc, session)
         hl_nodes, link_nodes = dn_export.export()
         hl_node_lists.append(hl_nodes)
-    
+
         # Link nodes not currently persisted to sqlite.
         _ = link_nodes
 

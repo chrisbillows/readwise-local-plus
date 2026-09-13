@@ -137,7 +137,7 @@ def create_invalid_readwise_objects_for_testing() -> dict[
         "missing_book_tags_and_highlights": (
             [
                 modify_mock_api_response(
-                    lambda b: (b.pop("book_tags", b.pop("highlights")))
+                    lambda b: b.pop("book_tags", b.pop("highlights"))
                 )
             ],
             [
