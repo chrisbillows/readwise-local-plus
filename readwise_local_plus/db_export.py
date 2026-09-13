@@ -195,13 +195,13 @@ class DbHls:
         Run before accessing properties on Hl state not guaranteed.
 
         """
-        self._fetch_db_query()
+        self._build_db_query()
         self._fetch_query_and_group_hls_by_book_id_and_book()
         self._enrich_highlights()
 
-    def _fetch_db_query(self):
+    def _build_db_query(self):
         """
-        Populate the db_query from the `query_shortname` and optional `batch_id`
+        Build the db_query from the `query_shortname` and optional `batch_id`.
 
         Raises
         ------
@@ -213,14 +213,31 @@ class DbHls:
             query = self.DB_QUERIES[self.query_shortname]
         except KeyError as err:
             logger.error(
-                "The `query_shortname`", 
-                self.query_shortname, 
-                "not found in `DB_QUERIES`."
+                "The `query_shortname` %r was not found in DB_QUERIES.",
+                self.query_shortname
             )
             raise err
 
-        if not self.batch_id == "all":
-            query = query.where(Highlight.batch_id == self.batch_id)
+        # This reads as a secondary query and filter step, but sqlalchemy
+        # consolidates and emits the sql 'all-in-one'.
+        # TODO: Rework to generalise for non-podcast/snipd.
+        if self.batch_id != "all":
+            affected_episode_urls = (
+                select(Book.source_url)
+                .join(
+                    Highlight,
+                    Highlight.book_id == Book.user_book_id
+                )
+                .where(
+                    Highlight.batch_id == self.batch_id,
+                    Book.category == "podcasts",
+                    Book.source == "snipd",
+                )
+            )
+
+            query = query.where(
+                Book.source_url.in_(affected_episode_urls)
+            )
 
         self.db_query = query
 
@@ -624,7 +641,7 @@ class SnipdEpisodeFromDb:
         """
         self.all_hl_versions = [hl for book in self.books for hl in book.highlights]
 
-        grouped_by_snipd_url = self._group_hls_by_snipd_url(self.all_hl_versions)
+        grouped_by_snipd_url = self._group_hls_by_snipd_url()
         deduplicated_hls = self._deduplicate_hls(grouped_by_snipd_url)
 
         # NOTE: AI notes have an int 0 location. This sort puts them first.

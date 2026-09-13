@@ -69,7 +69,6 @@ def write_dbhls_to_obsidian(
     ensure_readwise_dirs(user_config)
 
     dbhls = DbHls(query_shortname, batch_id)
-
     # TODO: Add output from analysis obj for monitoring?
 
     for snipd_ep in dbhls.hls_by_snipd_url:
@@ -82,35 +81,29 @@ def write_dbhls_to_obsidian(
 
         episode_file = podcast_dir / (snipd_ep.episode_title + ".md")
 
-        # create new file
+
         if not episode_file.exists():
-            episode_file.write_text(snipd_ep.full_page)
-            logger.info(f"Episode created:: {episode_file.name}")
-
-        # append to existing file
+            logger.info("Episode created: %s | %s", snipd_ep.podcast_title, episode_file.name)
         else:
-            # Use `open` as cannot append with pathlib
-            with open(episode_file, "a") as file_handle:
-                episode_content = (
-                    f"\n\n***(Appended {str(date.today())})***\n\n" +
-                    snipd_ep.page_body
-                )
-                file_handle.write(episode_content)
-            logger.info(f"Episode appended: {episode_file.name}")
+            logger.info(f"Episode overwritten: %s | %s", snipd_ep.podcast_title, episode_file.name)
 
+        episode_file.write_text(snipd_ep.full_page)
 
 if __name__ == "__main__":
     # Use for experimentation/development of the `db_export.py`.
     from readwise_local_plus.config import fetch_user_config
+    from readwise_local_plus.configure_logging import setup_logging
+
+    setup_logging()
 
     user_config = fetch_user_config()
     query_shortname = "snipd"
 
     # Useful batches
-    batch_id = "all" # ~890 snipd books
+    # batch_id = "all" # ~890 snipd books
     # batch_id = 110 # 0 snipd books
     # batch_id = 111 # 376 snipd books
-    # batch_id = 112 # 1 snipd books
+    batch_id = 112 # 1 snipd books
     # batch_id = 113 # 10 snipd books
 
     write_dbhls_to_obsidian(user_config, query_shortname, batch_id)

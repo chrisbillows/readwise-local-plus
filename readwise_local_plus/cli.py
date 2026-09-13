@@ -161,15 +161,11 @@ def main(user_config: Optional[UserConfig] = None) -> None:
     args = parse_args()
 
     if args.command == "sync":
-        # Run with a batch_id to test obsidian sync
-        # DON'T MESS WITH `else` as you are using this version for real syncing!
 
         if args.batch_id is not None:
-            logger.info("Writing existing Readwise batch %s to Obsidian.", args.batch_id)
-
-            # commented out to avoid writing to roam during testing
-            # write_batch_to_daily_notes(args.batch_id)
-            write_dbhls_to_obsidian(user_config, args.batch_id)
+            logger.info("Writing qualifying HLs in batch %s to Roam and Obsidian.", args.batch_id)
+            write_batch_to_daily_notes(args.batch_id)
+            write_dbhls_to_obsidian(user_config, "snipd", args.batch_id)
 
         elif args.all:
             logger.info("Running full sync (--all).")
@@ -181,12 +177,12 @@ def main(user_config: Optional[UserConfig] = None) -> None:
             batch_written = run_pipeline_flattened_objects(
                 user_config, last_fetch=last_fetch
             )
-            print("Batch written was: ", batch_written)
+            logger.info("Batch written to db was: %s", batch_written)
             if batch_written:
                 write_batch_to_daily_notes(batch_written)
                 # UNCOMMENT WHEN FEATURE COMPLETE
                 # run_snipd_metadata_pipeline()
-                # write_batch_to_obsidian(user_config, batch_written)
+                write_dbhls_to_obsidian(user_config, "snipd", batch_written)
 
     elif args.command == "list-invalids":
         list_invalid_db_objects(user_config)
