@@ -71,6 +71,7 @@ def dataclass_from_orm(cls: type[T], orm_object: Base, **overrides: Any) -> T:
 
 class DbHls:
     # Key is shortname : string, value is a db query : Select[tuple[Highlight]]
+    # NOTE: This query is extended if a batch_id is passed in `DbHls._build_db_query`
     DB_QUERIES = {
         "snipd" : (
             select(Highlight)

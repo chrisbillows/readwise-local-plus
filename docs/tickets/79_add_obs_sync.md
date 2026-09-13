@@ -4,13 +4,35 @@
 in online text boxes when we spend all day in a text editor is 
 silly.)
 
-## Top level overview
 
-(When complete move into the new )
+## Working with batches
+
+The code strucutre below was written against "all"; batches is maybe, slightly a hack.
+
+With all `hls` (that meet the criteria, e.g. snipd/podcasts) we know we have every book, 
+with every Hl. We group by book source url and then order/filter Hls and we have the
+latest, deduplicated, ordered highlights. We overwrite an existing file with this revised,
+complete file.
+
+i.e. The code essentially assumes, all highlights are present.
+
+For a batch only - we would only have the *highlights in the batch*. We'd overwrite older
+incomplete files, with newer - but incomplete files.  
+
+This is resolved with the database query itself. If a batch is passed to `DbHls` then
+the query finds all snipd/podcasts unique book source urls and pulls all highlights
+from those books with those urls. 
+
+Effectively - we pull all highlights from any batch, based on the unique snipd urls in the
+batch.
+
+This may not be ideal longer term - or may be.
+
+## Top level overview
 
 - In DB Export:
     - `DbHls` is a parent object for a database export; it groups Hls (into by_book, by_snipd_url)
-    - `HighlightFromDB` and `BookFromDB` now include ALL db fields, and additional helper fields
+    - `HighlightFromDB` and `BookFromDB` include ALL db fields, and additional helper fields
     - `SnipdEpisodeByDB` is a grouping of `BookFromDb`s with the same Snipd URL
         - So effectively a container object for books and highlights
     - `SnipdHighlightTranscript` and `SnipdHighlightAiEpisodeNotes` are instantiated with a `HighlightFromDb` and contain processing methods
@@ -213,26 +235,8 @@ There are two observed failure types:
     1) Updates to old episodes
     2) New listening sessions where "something" ignores the deduping
 
-The workflow is: 
+Both can be handled by the same workflow.
 
-- tbc, to complete
-
-For an episode that already exists
-    - delete the old episode from Obsidian
-    - recreate a new one
-    - log a warning (original ep was deleted with rw link to old ep?)
-    - include rw link to old ep in the new episode export
-
-Possible flow:
-- revision found
-- existing page check
-- existing page found...
-- existing page deleted...
-- pull all highlights by snipd-uid
-- write out page
-- skip the remainder in the current batch
-
-- ***THIS ISN"T BUILT OR TESTED YET!!!***
 
 #### Existing page overwriting
 
