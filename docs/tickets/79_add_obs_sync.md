@@ -28,6 +28,27 @@ batch.
 
 This may not be ideal longer term - or may be.
 
+```mermaid
+flowchart TD
+    HLs_by_podcast_episode --> eps_file_does_not_exist --> write_file
+    HLs_by_podcast_episode --> eps_file_does_exist
+    eps_file_does_exist --> pure_append
+    eps_file_does_exist --> pure_duplicates
+    eps_file_does_exist --> duplicates_and_append
+```
+
+Rationale for always overwriting: 
+
+- simple, clean
+- much more complex if we ever start quoting etc.
+    - but honestly, we WILL want to do that...
+    - in Obsidian anyway??
+    - more likely in Roam
+    - LOL what actually is this for again!?!
+    - requires my text box solution...
+        - which could be my ideal typescript next project...
+        - do it as electron etc.
+
 ## Top level overview
 
 - In DB Export:
