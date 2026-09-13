@@ -1,24 +1,8 @@
-from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import datetime, date
 import logging
-from typing import Any
-import os
-from urllib.parse import urlparse
-
-from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
 from pathlib import Path
 
 from readwise_local_plus.config import UserConfig, fetch_user_config
-from readwise_local_plus.db_operations import get_session
-from readwise_local_plus.db_export import (
-        BookFromDb, HighlightFromDb, SnipdEpisodeFromDb, DbHls
-    )
-from readwise_local_plus.models import (
-    Book, Highlight,
-)
-
+from readwise_local_plus.db_export import DbHls
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +69,7 @@ def write_dbhls_to_obsidian(
         if not episode_file.exists():
             logger.info("Episode created: %s | %s", snipd_ep.podcast_title, episode_file.name)
         else:
-            logger.info(f"Episode overwritten: %s | %s", snipd_ep.podcast_title, episode_file.name)
+            logger.info("Episode overwritten: %s | %s", snipd_ep.podcast_title, episode_file.name)
 
         episode_file.write_text(snipd_ep.full_page)
 

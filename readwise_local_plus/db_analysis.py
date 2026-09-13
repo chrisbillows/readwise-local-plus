@@ -1,23 +1,15 @@
 """
 Functions to interrogate the local readwise database.
 """
-from dataclasses import dataclass, field
-from datetime import datetime, date
 import inspect
 import logging
-
-from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
-from pathlib import Path
-
-from sqlalchemy import Select, select
+from datetime import datetime
 
 from readwise_local_plus.db_export import (
-    DbHls, BookFromDb, HighlightFromDb, SnipdEpisodeFromDb
-)
-from readwise_local_plus.models import (
-    Book,
-    Highlight,
+    BookFromDb,
+    DbHls,
+    HighlightFromDb,
+    SnipdEpisodeFromDb,
 )
 
 logger = logging.getLogger(__name__)

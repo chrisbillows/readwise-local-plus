@@ -12,24 +12,21 @@ specific objects if performance is an issue.
 """
 from __future__ import annotations
 
-
+import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, fields, is_dataclass
-from datetime import datetime, date
-import logging
+from datetime import date, datetime
 from pathlib import Path
-import re
 from typing import Any, TypeVar
 from urllib.parse import urlparse
 
 from sqlalchemy import Select, select
 from sqlalchemy.orm import contains_eager
 
-from readwise_local_plus.models import Base
 from readwise_local_plus.config import UserConfig, fetch_user_config
 from readwise_local_plus.db_operations import get_session
-from readwise_local_plus.models import Book, Highlight
-
+from readwise_local_plus.models import Base, Book, Highlight
 
 logger = logging.getLogger(__name__)
 
@@ -1133,7 +1130,7 @@ class SnipdAiEpisodeNotesFmtr(BaseFmtr):
             for char in sentence[:4]:
                 try:
                     int(char)
-                except ValueError as err:
+                except ValueError:
                     continue
                 leading_number_chars += 1
 

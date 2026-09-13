@@ -1,10 +1,10 @@
-from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import date, datetime
 import hashlib
 import json
 import logging
 import re
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Any, Literal
 
 from sqlalchemy import select
@@ -25,7 +25,6 @@ from readwise_local_plus.models import (
     RoamPage,
     RoamPageSnapshot,
 )
-
 
 logger = logging.getLogger(__name__)
 

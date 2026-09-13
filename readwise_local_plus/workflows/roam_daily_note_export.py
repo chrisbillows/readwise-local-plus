@@ -1,9 +1,8 @@
+import logging
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from enum import Enum
-import logging
-import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -13,7 +12,6 @@ from readwise_local_plus.config import fetch_user_config
 from readwise_local_plus.db_operations import get_session
 from readwise_local_plus.integrations.roam import RoamClient, TempUidGenerator
 from readwise_local_plus.models import Book, Highlight, RoamKnownPage
-
 
 logger = logging.getLogger(__name__)
 

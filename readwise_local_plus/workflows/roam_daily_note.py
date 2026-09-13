@@ -269,7 +269,6 @@ class RoamDailyNoteHighlightWriter:
 
         if book and getattr(book, "category", None) == "tweets":
             text += f"[↗️]({highlight.url or 'n/a'})"
-            url = getattr(highlight, "url", None)
 
             # text_block = HighlightBlockSpec(text=text, is_primary=True)
 

@@ -20,8 +20,9 @@ from readwise_local_plus.utils import (
 from readwise_local_plus.workflows.chatgpt_daily_prototype import (
     write_batch_to_daily_notes,
 )
-
-from readwise_local_plus.workflows.obsidian.obsidian_snipd import write_dbhls_to_obsidian
+from readwise_local_plus.workflows.obsidian.obsidian_snipd import (
+    write_dbhls_to_obsidian,
+)
 
 logger = logging.getLogger(__name__)
 
